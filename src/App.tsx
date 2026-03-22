@@ -12,6 +12,8 @@ import {
   Camera,
   X,
   Palette,
+  Minimize2,
+  Maximize2,
 } from "lucide-react";
 import "./App.css";
 
@@ -119,9 +121,12 @@ function App() {
     view?: string;
     files?: string[];
   } | null>(null);
+  const [frameSize, setFrameSize] = useState({ width: 300, height: 450 });
+  const frameResizing = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
   const dragState = useRef<DragState>({ mode: "none", startX: 0, startY: 0 });
   const textJustOpened = useRef(false);
   const savedSize = useRef<{ width: number; height: number } | null>(null);
+  const clipboard = useRef<Shape | null>(null);
 
   // --- Render ---
   const redraw = useCallback(() => {
@@ -152,9 +157,12 @@ function App() {
         ctx.strokeRect(x, y, w, h);
         ctx.setLineDash([]);
       } else if (shape.type === "draw" && shape.points) {
+        const dashDef = LINE_STYLES.find((ls) => ls.style === shape.lineStyle);
+        ctx.setLineDash(dashDef ? dashDef.dash : []);
         ctx.beginPath();
         shape.points.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
         ctx.stroke();
+        ctx.setLineDash([]);
       } else if (shape.type === "text" && shape.text) {
         ctx.font = "bold 16px -apple-system, BlinkMacSystemFont, sans-serif";
         ctx.shadowColor = "rgba(0,0,0,0.5)";
@@ -243,6 +251,20 @@ function App() {
       }
       if (e.key === "Escape") { setSelectedId(null); setTextInput((t) => ({ ...t, visible: false })); setColorOpen(false); }
       if ((e.metaKey || e.ctrlKey) && e.key === "z") { e.preventDefault(); setShapes((p) => p.slice(0, -1)); setSelectedId(null); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "c" && selectedId) {
+        e.preventDefault();
+        const sel = shapes.find((s) => s.id === selectedId);
+        if (sel) clipboard.current = { ...sel, points: sel.points ? [...sel.points] : undefined };
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "v" && clipboard.current) {
+        e.preventDefault();
+        const src = clipboard.current;
+        const newId = genId();
+        const offset = 20;
+        const pasted: Shape = { ...src, id: newId, x: src.x + offset, y: src.y + offset, points: src.points ? src.points.map((p) => ({ x: p.x + offset, y: p.y + offset })) : undefined };
+        setShapes((p) => [...p, pasted]);
+        setSelectedId(newId);
+      }
       if (!e.metaKey && !e.ctrlKey) {
         const clearState = () => { setCurrentShape(null); setSelectedId(null); setTextInput((t) => ({ ...t, visible: false })); setTextValue(""); setColorOpen(false); };
         if (e.key === "s") { setTool("select"); clearState(); }
@@ -254,6 +276,34 @@ function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedId, textInput.visible, collapsed]);
+
+  const handleFrameResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    frameResizing.current = { startX: e.clientX, startY: e.clientY, startW: frameSize.width, startH: frameSize.height };
+    const onMove = async (ev: MouseEvent) => {
+      if (!frameResizing.current) return;
+      const { startX, startY, startW, startH } = frameResizing.current;
+      const newW = Math.max(120, startW + ev.clientX - startX);
+      const newH = Math.max(80, startH + ev.clientY - startY);
+      setFrameSize({ width: newW, height: newH });
+      // Auto-adjust window height to fit frame
+      const { LogicalSize } = await import("@tauri-apps/api/dpi");
+      const win = getCurrentWindow();
+      const winSize = await win.innerSize();
+      const scale = await win.scaleFactor();
+      const winW = Math.round(winSize.width / scale);
+      const neededH = newH + 56; // panel + margins
+      await win.setSize(new LogicalSize(Math.max(winW, newW + 16), neededH));
+    };
+    const onUp = () => {
+      frameResizing.current = null;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
 
   const getPos = (e: React.MouseEvent): Point => {
     const r = canvasRef.current!.getBoundingClientRect();
@@ -277,6 +327,14 @@ function App() {
       if (selectedId) {
         const sel = shapes.find((s) => s.id === selectedId);
         if (sel) { const h = hitHandle(sel, pos.x, pos.y); if (h) { dragState.current = { mode: "resizing", startX: pos.x, startY: pos.y, snapshot: { ...sel }, handle: h }; return; } }
+        // Double-click on selected text to edit
+        if (sel && sel.type === "text" && e.detail === 2 && hitShape(sel, pos.x, pos.y)) {
+          setTextInput({ x: sel.x, y: sel.y, visible: true });
+          setTextValue(sel.text || "");
+          setShapes((p) => p.filter((s) => s.id !== selectedId));
+          setSelectedId(null);
+          return;
+        }
       }
       for (let i = shapes.length - 1; i >= 0; i--) {
         if (hitShape(shapes[i], pos.x, pos.y)) {
@@ -301,7 +359,7 @@ function App() {
 
     const id = genId();
     if (tool === "rect") setCurrentShape({ id, type: "rect", color, strokeWidth: 2.5, lineStyle, x: pos.x, y: pos.y, width: 0, height: 0 });
-    else if (tool === "draw") setCurrentShape({ id, type: "draw", color, strokeWidth: 3, lineStyle: "solid", x: pos.x, y: pos.y, points: [pos] });
+    else if (tool === "draw") setCurrentShape({ id, type: "draw", color, strokeWidth: 3, lineStyle, x: pos.x, y: pos.y, points: [pos] });
     dragState.current = { mode: "drawing", startX: pos.x, startY: pos.y };
   };
 
@@ -344,6 +402,7 @@ function App() {
         if (Math.abs(currentShape.width ?? 0) > 3 || Math.abs(currentShape.height ?? 0) > 3)
           setShapes((p) => [...p, currentShape]);
       } else setShapes((p) => [...p, currentShape]);
+      if (currentShape.type === "rect") setTool("select");
       setCurrentShape(null);
     }
     dragState.current = { mode: "none", startX: 0, startY: 0 };
@@ -355,6 +414,7 @@ function App() {
     }
     setTextInput((t) => ({ ...t, visible: false }));
     setTextValue("");
+    setTool("select");
   };
 
   const handleTextBlur = () => {
@@ -423,7 +483,7 @@ function App() {
   return (
     <div className="app">
       {flash && <div className="screenshot-flash" />}
-      {toast && <div className="toast">{toast}</div>}
+      {toast && !collapsed && <div className="toast">{toast}</div>}
       {screenshotInfo && (
         <div className="screenshot-modal" onClick={() => setScreenshotInfo(null)}>
           <div className="screenshot-modal-content" onClick={(e) => e.stopPropagation()}>
@@ -457,6 +517,9 @@ function App() {
           <button className="panel-btn close-btn" onClick={handleClose} title={"Close\nQuit the annotation tool"}>
             <X size={12} strokeWidth={2.5} />
           </button>
+          <button className="panel-btn" onClick={handleCollapse} title={collapsed ? "Show Frame (⌘M)\nExpand the screenshot frame" : "Hide Frame (⌘M)\nCollapse the screenshot frame"}>
+            {collapsed ? <Maximize2 {...ICON} /> : <Minimize2 {...ICON} />}
+          </button>
 
           <span className="panel-sep" />
 
@@ -484,16 +547,16 @@ function App() {
           }} title={`Style: ${lineStyle}\nCycle through dotted, dashed, solid`}>
             <svg width="18" height="10" viewBox="0 0 18 10">
               {lineStyle === "dotted" && <>
-                <circle cx="2" cy="5" r="1.2" fill="rgba(255,255,255,0.8)" />
-                <circle cx="6" cy="5" r="1.2" fill="rgba(255,255,255,0.8)" />
-                <circle cx="10" cy="5" r="1.2" fill="rgba(255,255,255,0.8)" />
-                <circle cx="14" cy="5" r="1.2" fill="rgba(255,255,255,0.8)" />
+                <circle cx="2" cy="5" r="1.2" fill="currentColor" />
+                <circle cx="6" cy="5" r="1.2" fill="currentColor" />
+                <circle cx="10" cy="5" r="1.2" fill="currentColor" />
+                <circle cx="14" cy="5" r="1.2" fill="currentColor" />
               </>}
               {lineStyle === "dashed" && <>
-                <line x1="0" y1="5" x2="5" y2="5" stroke="rgba(255,255,255,0.8)" strokeWidth="2" />
-                <line x1="8" y1="5" x2="13" y2="5" stroke="rgba(255,255,255,0.8)" strokeWidth="2" />
+                <line x1="0" y1="5" x2="5" y2="5" stroke="currentColor" strokeWidth="2" />
+                <line x1="8" y1="5" x2="13" y2="5" stroke="currentColor" strokeWidth="2" />
               </>}
-              {lineStyle === "solid" && <line x1="0" y1="5" x2="18" y2="5" stroke="rgba(255,255,255,0.8)" strokeWidth="2" />}
+              {lineStyle === "solid" && <line x1="0" y1="5" x2="18" y2="5" stroke="currentColor" strokeWidth="2" />}
             </svg>
           </button>
 
@@ -548,15 +611,16 @@ function App() {
         </div>
       </div>
 
-      {!collapsed && <div className={`canvas-frame ${focused ? "frame-active" : ""}`}>
+      {!collapsed && <div className={`canvas-frame ${focused ? "frame-active" : ""}`} style={{ width: frameSize.width, height: frameSize.height }}>
         <canvas ref={canvasRef} style={{ cursor }}
           onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} />
+        <div className="frame-resize-handle" onMouseDown={handleFrameResizeStart} />
         {textInput.visible && (
           <input
             ref={textRef}
             className="text-overlay-input"
-            style={{ left: textInput.x, top: textInput.y }}
+            style={{ left: textInput.x, top: textInput.y, color }}
             value={textValue}
             onChange={(e) => setTextValue(e.target.value)}
             onKeyDown={(e) => {
@@ -580,6 +644,10 @@ function App() {
             for (const p of sel.points) { minY = Math.min(minY, p.y); sumX += p.x; }
             px = sumX / sel.points.length;
             py = minY - 10;
+          } else if (sel.type === "text" && sel.text) {
+            const tw = sel.text.length * 9 + 10;
+            px = sel.x + tw / 2;
+            py = sel.y - 28;
           } else {
             px = sel.x;
             py = sel.y - 28;
@@ -601,7 +669,7 @@ function App() {
               </div>
               {/* Row 2: Style + Delete */}
               <div className="pop-row">
-                {sel.type === "rect" && (
+                {(sel.type === "rect" || sel.type === "draw") && (
                   <>
                     {LINE_STYLES.map((ls) => (
                       <button key={ls.style} className={`pop-style ${sel.lineStyle === ls.style ? "active" : ""}`}
