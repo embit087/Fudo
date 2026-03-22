@@ -6,6 +6,8 @@ Draw bounding boxes, scribble notes, and screenshot your simulator — all witho
 
 > "I could just use the built-in screenshot tool" — someone who hasn't tried Fudo yet
 
+![Fudo in action](screenshot-demo.png)
+
 ## What it does
 
 Fudo is a transparent overlay that sits on top of your iOS Simulator. Draw on it. Annotate it. Screenshot it. Ship it in Slack. Become the person who actually communicates visually.
