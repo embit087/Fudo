@@ -1,0 +1,281 @@
+use serde::Serialize;
+use std::io::{BufRead, BufReader, Write};
+use std::net::TcpListener;
+use std::process::Command;
+use tauri::Manager;
+
+const API_PORT: u16 = 17321;
+const TOOLBAR_HEIGHT: f64 = 48.0;
+const APP_BUNDLE_ID: &str = "com.objsinc.shizuku";
+const PROJECT_ROOT: &str = "/Users/objsinc-macair-00/embitious/shizuku-project/shizuku-app";
+
+#[derive(Serialize, Clone)]
+struct SimContext {
+    sim_screenshot: Option<String>,
+    view: Option<String>,
+    files: Vec<String>,
+}
+
+fn get_sim_context() -> SimContext {
+    // 1. Take simulator screenshot
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let sim_path = format!("/private/tmp/sim-screenshot-{}.png", timestamp);
+
+    let sim_screenshot = Command::new("xcrun")
+        .args(["simctl", "io", "booted", "screenshot", &sim_path])
+        .output()
+        .ok()
+        .and_then(|o| if o.status.success() { Some(sim_path) } else { None });
+
+    // 2. Read current view from app container
+    let container = Command::new("xcrun")
+        .args(["simctl", "get_app_container", "booted", APP_BUNDLE_ID, "data"])
+        .output()
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+            } else {
+                None
+            }
+        });
+
+    let current_view = container.and_then(|c| {
+        let view_file = format!("{}/Documents/current_view.txt", c);
+        std::fs::read_to_string(view_file).ok().map(|s| s.trim().to_string())
+    });
+
+    // 3. Map view to source files
+    let mut files = Vec::new();
+    if let Some(ref view) = current_view {
+        let (dirs, vms): (Vec<&str>, Vec<&str>) = match view.as_str() {
+            "explore" => (
+                vec!["Views/Explore"],
+                vec!["ExploreViewModel", "ConversationViewModel", "MessagingViewModel"],
+            ),
+            "materials" => (vec!["Views/Materials"], vec!["MaterialsViewModel"]),
+            "study" => (
+                vec!["Views/Study"],
+                vec!["SessionViewModel", "SelectionViewModel", "PracticeViewModel"],
+            ),
+            "studylist" => (vec!["Views/StudyList"], vec!["StudyListViewModel"]),
+            "profile" => (vec!["Views/Profile"], vec!["ProfileViewModel"]),
+            _ => (vec![], vec![]),
+        };
+
+        let src = format!("{}/Sources/ShizukuApp", PROJECT_ROOT);
+        for d in &dirs {
+            let dir_path = format!("{}/{}", src, d);
+            if let Ok(entries) = std::fs::read_dir(&dir_path) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.extension().and_then(|e| e.to_str()) == Some("swift") {
+                        let rel = p.to_string_lossy().replace(&format!("{}/", PROJECT_ROOT), "");
+                        files.push(rel);
+                    }
+                }
+            }
+        }
+        for vm in &vms {
+            files.push(format!("Sources/ShizukuApp/ViewModels/{}.swift", vm));
+        }
+    }
+
+    SimContext {
+        sim_screenshot,
+        view: current_view,
+        files,
+    }
+}
+
+#[derive(Serialize)]
+struct ScreenshotResult {
+    path: String,
+    sim: SimContext,
+}
+
+fn get_window_geometry(handle: &tauri::AppHandle) -> Result<(i32, i32, u32, u32), String> {
+    let window = handle
+        .get_webview_window("main")
+        .ok_or("Window not found")?;
+    let pos = window.outer_position().map_err(|e| e.to_string())?;
+    let size = window.outer_size().map_err(|e| e.to_string())?;
+    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+
+    // Convert physical pixels to logical points for screencapture
+    let x = (pos.x as f64 / scale) as i32;
+    let y = ((pos.y as f64 / scale) + TOOLBAR_HEIGHT) as i32;
+    let w = (size.width as f64 / scale) as u32;
+    let h = ((size.height as f64 / scale) - TOOLBAR_HEIGHT) as u32;
+
+    Ok((x, y, w, h))
+}
+
+fn do_screenshot(handle: &tauri::AppHandle, custom_path: Option<String>) -> Result<String, String> {
+    let (x, y, w, h) = get_window_geometry(handle)?;
+
+    let path = match custom_path {
+        Some(p) => p,
+        None => {
+            let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| e.to_string())?
+                .as_secs();
+            format!("{}/Desktop/ios-annotate-{}.png", home, ts)
+        }
+    };
+
+    let region = format!("{},{},{},{}", x, y, w, h);
+    Command::new("screencapture")
+        .args(["-R", &region, &path])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    Ok(path)
+}
+
+#[tauri::command]
+fn take_screenshot(app: tauri::AppHandle, path: Option<String>) -> Result<ScreenshotResult, String> {
+    let screenshot_path = do_screenshot(&app, path)?;
+    let sim = get_sim_context();
+    Ok(ScreenshotResult {
+        path: screenshot_path,
+        sim,
+    })
+}
+
+fn percent_decode(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let bytes = input.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(byte) = u8::from_str_radix(
+                &input[i + 1..i + 3],
+                16,
+            ) {
+                result.push(byte as char);
+                i += 3;
+                continue;
+            }
+        }
+        result.push(bytes[i] as char);
+        i += 1;
+    }
+    result
+}
+
+fn parse_query_param<'a>(query: &'a str, key: &str) -> Option<String> {
+    query.split('&').find_map(|param| {
+        let (k, v) = param.split_once('=')?;
+        if k == key {
+            Some(percent_decode(v))
+        } else {
+            None
+        }
+    })
+}
+
+fn start_api_server(handle: tauri::AppHandle) {
+    let listener = match TcpListener::bind(format!("127.0.0.1:{}", API_PORT)) {
+        Ok(l) => {
+            log::info!("API server listening on 127.0.0.1:{}", API_PORT);
+            l
+        }
+        Err(e) => {
+            log::error!("Failed to start API server: {}", e);
+            return;
+        }
+    };
+
+    for stream in listener.incoming() {
+        let Ok(mut stream) = stream else { continue };
+        let handle = handle.clone();
+
+        std::thread::spawn(move || {
+            let reader_stream = match stream.try_clone() {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            let mut reader = BufReader::new(reader_stream);
+            let mut request_line = String::new();
+            if reader.read_line(&mut request_line).is_err() {
+                return;
+            }
+
+            let parts: Vec<&str> = request_line.trim().split_whitespace().collect();
+            if parts.len() < 2 {
+                return;
+            }
+
+            let full_path = parts[1];
+            let (path, query) = match full_path.split_once('?') {
+                Some((p, q)) => (p, Some(q)),
+                None => (full_path, None),
+            };
+
+            let (status, body) = match path {
+                "/health" => (
+                    "200 OK",
+                    r#"{"status":"ok","port":17321}"#.to_string(),
+                ),
+                "/screenshot" => {
+                    let custom_path = query.and_then(|q| parse_query_param(q, "path"));
+                    match do_screenshot(&handle, custom_path) {
+                        Ok(p) => {
+                            let sim = get_sim_context();
+                            let result = ScreenshotResult { path: p, sim };
+                            let body = serde_json::to_string(&result).unwrap_or_default();
+                            ("200 OK", body)
+                        },
+                        Err(e) => (
+                            "500 Internal Server Error",
+                            format!(r#"{{"error":"{}"}}"#, e.replace('"', "\\\"")),
+                        ),
+                    }
+                }
+                _ => (
+                    "404 Not Found",
+                    r#"{"error":"not found"}"#.to_string(),
+                ),
+            };
+
+            let response = format!(
+                "HTTP/1.1 {}\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                status,
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes());
+        });
+    }
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .setup(|app| {
+            if cfg!(debug_assertions) {
+                app.handle().plugin(
+                    tauri_plugin_log::Builder::default()
+                        .level(log::LevelFilter::Info)
+                        .build(),
+                )?;
+            }
+
+            // Start HTTP API server for CLI access
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                start_api_server(handle);
+            });
+
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![take_screenshot])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
