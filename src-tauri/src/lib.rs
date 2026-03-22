@@ -114,8 +114,18 @@ fn get_window_geometry(handle: &tauri::AppHandle) -> Result<(i32, i32, u32, u32)
     Ok((x, y, w, h))
 }
 
-fn do_screenshot(handle: &tauri::AppHandle, custom_path: Option<String>) -> Result<String, String> {
-    let (x, y, w, h) = get_window_geometry(handle)?;
+fn do_screenshot(handle: &tauri::AppHandle, custom_path: Option<String>, frame_rect: Option<(f64, f64, f64, f64)>) -> Result<String, String> {
+    let (x, y, w, h) = match frame_rect {
+        Some((fx, fy, fw, fh)) => {
+            let window = handle.get_webview_window("main").ok_or("Window not found")?;
+            let pos = window.outer_position().map_err(|e| e.to_string())?;
+            let scale = window.scale_factor().map_err(|e| e.to_string())?;
+            let win_x = pos.x as f64 / scale;
+            let win_y = pos.y as f64 / scale;
+            ((win_x + fx) as i32, (win_y + fy) as i32, fw as u32, fh as u32)
+        }
+        None => get_window_geometry(handle)?,
+    };
 
     let path = match custom_path {
         Some(p) => p,
@@ -139,8 +149,8 @@ fn do_screenshot(handle: &tauri::AppHandle, custom_path: Option<String>) -> Resu
 }
 
 #[tauri::command]
-fn take_screenshot(app: tauri::AppHandle, path: Option<String>) -> Result<ScreenshotResult, String> {
-    let screenshot_path = do_screenshot(&app, path)?;
+fn take_screenshot(app: tauri::AppHandle, path: Option<String>, frame_rect: Option<(f64, f64, f64, f64)>) -> Result<ScreenshotResult, String> {
+    let screenshot_path = do_screenshot(&app, path, frame_rect)?;
     let sim = get_sim_context();
     Ok(ScreenshotResult {
         path: screenshot_path,
@@ -225,7 +235,7 @@ fn start_api_server(handle: tauri::AppHandle) {
                 ),
                 "/screenshot" => {
                     let custom_path = query.and_then(|q| parse_query_param(q, "path"));
-                    match do_screenshot(&handle, custom_path) {
+                    match do_screenshot(&handle, custom_path, None) {
                         Ok(p) => {
                             let sim = get_sim_context();
                             let result = ScreenshotResult { path: p, sim };
@@ -255,6 +265,79 @@ fn start_api_server(handle: tauri::AppHandle) {
     }
 }
 
+#[derive(Serialize, Clone)]
+struct SimulatorWindow {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    name: String,
+}
+
+#[tauri::command]
+fn get_simulator_window() -> Result<Option<SimulatorWindow>, String> {
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(r#"tell application "System Events"
+    if not (exists process "Simulator") then return "none"
+    tell process "Simulator"
+        set frontWindow to front window
+        set {x, y} to position of frontWindow
+        set {w, h} to size of frontWindow
+        set winName to name of frontWindow
+        return "" & x & "," & y & "," & w & "," & h & "," & winName
+    end tell
+end tell"#)
+        .output()
+        .map_err(|e| format!("osascript failed: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(format!("osascript error: {}", stderr));
+    }
+
+    let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    if result == "none" || result.is_empty() {
+        return Ok(None);
+    }
+
+    let parts: Vec<&str> = result.splitn(5, ',').collect();
+    if parts.len() < 4 {
+        return Err(format!("Unexpected output: {}", result));
+    }
+
+    Ok(Some(SimulatorWindow {
+        x: parts[0].trim().parse().unwrap_or(0),
+        y: parts[1].trim().parse().unwrap_or(0),
+        width: parts[2].trim().parse().unwrap_or(0),
+        height: parts[3].trim().parse().unwrap_or(0),
+        name: parts.get(4).unwrap_or(&"Simulator").trim().to_string(),
+    }))
+}
+
+#[tauri::command]
+async fn attach_to_simulator(app: tauri::AppHandle) -> Result<SimulatorWindow, String> {
+    let sim = get_simulator_window()?.ok_or("Simulator not running")?;
+
+    let window = app.get_webview_window("main").ok_or("Window not found")?;
+    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+
+    // Position Fudo window at the simulator's position
+    let phys_x = (sim.x as f64 * scale) as i32;
+    let phys_y = (sim.y as f64 * scale) as i32;
+    window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(phys_x, phys_y)))
+        .map_err(|e| e.to_string())?;
+
+    // Resize window to match simulator
+    let phys_w = (sim.width as f64 * scale) as u32;
+    let phys_h = (sim.height as f64 * scale) as u32;
+    window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(phys_w, phys_h)))
+        .map_err(|e| e.to_string())?;
+
+    Ok(sim)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -275,7 +358,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![take_screenshot])
+        .invoke_handler(tauri::generate_handler![take_screenshot, get_simulator_window, attach_to_simulator])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

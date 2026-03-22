@@ -63,9 +63,14 @@
   color: #007AFF !important;
 }
 
+.panel-collapsed .panel-btn:not(.close-btn):not(.frame-toggle-btn) {
+  opacity: 0.3;
+}
+
 .panel-collapsed .snap-btn:hover {
   background: rgba(0, 122, 255, 0.22) !important;
 }
+
 
 .panel-collapsed .color-indicator {
   border-color: rgba(0, 0, 0, 0.2);
@@ -106,6 +111,25 @@
 
 .panel-btn:hover {
   background: rgba(255, 255, 255, 0.12);
+}
+
+/* --- Tooltip --- */
+.tooltip-bubble {
+  position: fixed;
+  background: rgba(28, 28, 30, 0.95);
+  color: rgba(255, 255, 255, 0.9);
+  font: 500 10px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+  padding: 5px 9px;
+  border-radius: 5px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 200;
+  animation: tip-in 0.08s ease-out;
+}
+
+@keyframes tip-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .panel-btn.active {
@@ -283,6 +307,21 @@
   border-bottom: 2px solid rgba(255, 255, 255, 0.35);
 }
 
+.frame-size-label {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.7);
+  color: rgba(255, 255, 255, 0.9);
+  font: 600 11px/1 -apple-system, BlinkMacSystemFont, monospace;
+  padding: 4px 8px;
+  border-radius: 4px;
+  z-index: 20;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
 .canvas-frame canvas {
   position: absolute;
   top: 0;
@@ -453,9 +492,13 @@
   padding: 12px 24px;
   border-radius: 10px;
   z-index: 100;
-  pointer-events: none;
-  animation: toast-fade 1.2s ease-out forwards;
+  pointer-events: auto;
+  cursor: pointer;
   box-shadow: none;
+}
+
+.toast-auto {
+  animation: toast-fade 1.2s ease-out forwards;
 }
 
 @keyframes toast-fade {

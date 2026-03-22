@@ -14,10 +14,16 @@ import {
   Palette,
   Minimize2,
   Maximize2,
+  Circle,
+  ArrowUpRight,
+  Minus,
+  Triangle,
+  Shapes,
+  Smartphone,
 } from "lucide-react";
 import "./App.css";
 
-type Tool = "select" | "rect" | "draw" | "text";
+type Tool = "select" | "rect" | "draw" | "text" | "circle" | "arrow" | "line" | "triangle";
 
 interface Point { x: number; y: number }
 
@@ -31,7 +37,7 @@ const LINE_STYLES: { style: LineStyle; label: string; dash: number[] }[] = [
 
 interface Shape {
   id: string;
-  type: "rect" | "draw" | "text";
+  type: "rect" | "draw" | "text" | "circle" | "arrow" | "line" | "triangle";
   color: string;
   strokeWidth: number;
   lineStyle: LineStyle;
@@ -66,8 +72,10 @@ function normalizeRect(s: Shape) {
   return { x: w < 0 ? s.x + w : s.x, y: h < 0 ? s.y + h : s.y, w: Math.abs(w), h: Math.abs(h) };
 }
 
+const BBOX_TYPES = ["rect", "circle", "arrow", "line", "triangle"];
+
 function getHandlePositions(s: Shape) {
-  if (s.type !== "rect") return [];
+  if (!BBOX_TYPES.includes(s.type)) return [];
   const { x, y, w, h } = normalizeRect(s);
   return [
     { handle: "nw" as Handle, x, y },
@@ -84,7 +92,7 @@ function hitHandle(s: Shape, mx: number, my: number): Handle | null {
 }
 
 function hitShape(s: Shape, mx: number, my: number): boolean {
-  if (s.type === "rect") {
+  if (BBOX_TYPES.includes(s.type)) {
     const { x, y, w, h } = normalizeRect(s);
     const m = 5;
     return mx >= x - m && mx <= x + w + m && my >= y - m && my <= y + h + m;
@@ -100,6 +108,7 @@ function hitShape(s: Shape, mx: number, my: number): boolean {
 
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLInputElement>(null);
   const [tool, setTool] = useState<Tool>("rect");
   const [color, setColor] = useState("#FF3B30");
@@ -112,7 +121,20 @@ function App() {
   const [flash, setFlash] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [colorOpen, setColorOpen] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [shapesOpen, setShapesOpen] = useState(false);
+  const [tooltip, setTooltip] = useState<{ text: string; x: number; y: number } | null>(null);
+
+  const tip = (text: string, forceEnabled?: boolean) => ({
+    onMouseEnter: (e: React.MouseEvent) => {
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const label = collapsed && !forceEnabled ? `${text} (disabled)` : text;
+      setTooltip({ text: label, x: r.left + r.width / 2, y: r.bottom + 6 });
+    },
+    onMouseLeave: () => setTooltip(null),
+    onMouseDown: () => { if (!collapsed || forceEnabled) setTooltip(null); },
+    onClick: collapsed && !forceEnabled ? (e: React.MouseEvent) => e.preventDefault() : undefined,
+  });
+  const [toast, setToast] = useState<{ msg: string; persistent: boolean } | null>(null);
   const [focused, setFocused] = useState(true);
   const [screenshotInfo, setScreenshotInfo] = useState<{
     path: string;
@@ -121,7 +143,8 @@ function App() {
     view?: string;
     files?: string[];
   } | null>(null);
-  const [frameSize, setFrameSize] = useState({ width: 300, height: 450 });
+  const [frameSize, setFrameSize] = useState({ width: 375, height: 790 });
+  const [frameResizingActive, setFrameResizingActive] = useState(false);
   const frameResizing = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
   const dragState = useRef<DragState>({ mode: "none", startX: 0, startY: 0 });
   const textJustOpened = useRef(false);
@@ -156,6 +179,53 @@ function App() {
         ctx.setLineDash(dashDef ? dashDef.dash : [3, 4]);
         ctx.strokeRect(x, y, w, h);
         ctx.setLineDash([]);
+      } else if (shape.type === "circle") {
+        const { x, y, w, h } = normalizeRect(shape);
+        const dashDef = LINE_STYLES.find((ls) => ls.style === shape.lineStyle);
+        ctx.setLineDash(dashDef ? dashDef.dash : []);
+        ctx.beginPath();
+        ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else if (shape.type === "arrow") {
+        const { x, y, w, h } = normalizeRect(shape);
+        const dashDef = LINE_STYLES.find((ls) => ls.style === shape.lineStyle);
+        ctx.setLineDash(dashDef ? dashDef.dash : []);
+        const ex = x + w, ey = y + h;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(ex, ey);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // Arrowhead
+        const angle = Math.atan2(h, w);
+        const headLen = 12;
+        ctx.beginPath();
+        ctx.moveTo(ex, ey);
+        ctx.lineTo(ex - headLen * Math.cos(angle - 0.4), ey - headLen * Math.sin(angle - 0.4));
+        ctx.moveTo(ex, ey);
+        ctx.lineTo(ex - headLen * Math.cos(angle + 0.4), ey - headLen * Math.sin(angle + 0.4));
+        ctx.stroke();
+      } else if (shape.type === "line") {
+        const { x, y, w, h } = normalizeRect(shape);
+        const dashDef = LINE_STYLES.find((ls) => ls.style === shape.lineStyle);
+        ctx.setLineDash(dashDef ? dashDef.dash : []);
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + w, y + h);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else if (shape.type === "triangle") {
+        const { x, y, w, h } = normalizeRect(shape);
+        const dashDef = LINE_STYLES.find((ls) => ls.style === shape.lineStyle);
+        ctx.setLineDash(dashDef ? dashDef.dash : []);
+        ctx.beginPath();
+        ctx.moveTo(x + w / 2, y);
+        ctx.lineTo(x + w, y + h);
+        ctx.lineTo(x, y + h);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.setLineDash([]);
       } else if (shape.type === "draw" && shape.points) {
         const dashDef = LINE_STYLES.find((ls) => ls.style === shape.lineStyle);
         ctx.setLineDash(dashDef ? dashDef.dash : []);
@@ -174,7 +244,7 @@ function App() {
         ctx.setLineDash([4, 4]);
         ctx.strokeStyle = "#00BFFF";
         ctx.lineWidth = 1.5;
-        if (shape.type === "rect") {
+        if (BBOX_TYPES.includes(shape.type)) {
           const { x, y, w, h } = normalizeRect(shape);
           ctx.strokeRect(x - 3, y - 3, w + 6, h + 6);
         } else if (shape.type === "draw" && shape.points?.length) {
@@ -186,7 +256,7 @@ function App() {
           ctx.strokeRect(shape.x - 5, shape.y - 20, tw, 28);
         }
         ctx.setLineDash([]);
-        if (shape.type === "rect") {
+        if (BBOX_TYPES.includes(shape.type)) {
           for (const hp of getHandlePositions(shape)) {
             ctx.fillStyle = "#FFF";
             ctx.strokeStyle = "#00BFFF";
@@ -249,7 +319,7 @@ function App() {
         setShapes((p) => p.filter((s) => s.id !== selectedId));
         setSelectedId(null);
       }
-      if (e.key === "Escape") { setSelectedId(null); setTextInput((t) => ({ ...t, visible: false })); setColorOpen(false); }
+      if (e.key === "Escape") { setSelectedId(null); setTextInput((t) => ({ ...t, visible: false })); setColorOpen(false); setShapesOpen(false); }
       if ((e.metaKey || e.ctrlKey) && e.key === "z") { e.preventDefault(); setShapes((p) => p.slice(0, -1)); setSelectedId(null); }
       if ((e.metaKey || e.ctrlKey) && e.key === "c" && selectedId) {
         e.preventDefault();
@@ -281,6 +351,7 @@ function App() {
     e.preventDefault();
     e.stopPropagation();
     frameResizing.current = { startX: e.clientX, startY: e.clientY, startW: frameSize.width, startH: frameSize.height };
+    setFrameResizingActive(true);
     const onMove = async (ev: MouseEvent) => {
       if (!frameResizing.current) return;
       const { startX, startY, startW, startH } = frameResizing.current;
@@ -298,6 +369,7 @@ function App() {
     };
     const onUp = () => {
       frameResizing.current = null;
+      setFrameResizingActive(false);
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
@@ -358,7 +430,8 @@ function App() {
     }
 
     const id = genId();
-    if (tool === "rect") setCurrentShape({ id, type: "rect", color, strokeWidth: 2.5, lineStyle, x: pos.x, y: pos.y, width: 0, height: 0 });
+    if (tool === "rect" || tool === "circle" || tool === "arrow" || tool === "line" || tool === "triangle")
+      setCurrentShape({ id, type: tool, color, strokeWidth: 2.5, lineStyle, x: pos.x, y: pos.y, width: 0, height: 0 });
     else if (tool === "draw") setCurrentShape({ id, type: "draw", color, strokeWidth: 3, lineStyle, x: pos.x, y: pos.y, points: [pos] });
     dragState.current = { mode: "drawing", startX: pos.x, startY: pos.y };
   };
@@ -367,7 +440,7 @@ function App() {
     const pos = getPos(e);
     const ds = dragState.current;
     if (ds.mode === "drawing" && currentShape) {
-      if (currentShape.type === "rect") setCurrentShape({ ...currentShape, width: pos.x - currentShape.x, height: pos.y - currentShape.y });
+      if (BBOX_TYPES.includes(currentShape.type)) setCurrentShape({ ...currentShape, width: pos.x - currentShape.x, height: pos.y - currentShape.y });
       else if (currentShape.type === "draw") setCurrentShape({ ...currentShape, points: [...(currentShape.points || []), pos] });
     }
     if (ds.mode === "moving" && ds.snapshot && selectedId) {
@@ -398,11 +471,11 @@ function App() {
 
   const handleMouseUp = () => {
     if (dragState.current.mode === "drawing" && currentShape) {
-      if (currentShape.type === "rect") {
+      if (BBOX_TYPES.includes(currentShape.type)) {
         if (Math.abs(currentShape.width ?? 0) > 3 || Math.abs(currentShape.height ?? 0) > 3)
           setShapes((p) => [...p, currentShape]);
       } else setShapes((p) => [...p, currentShape]);
-      if (currentShape.type === "rect") setTool("select");
+      if (BBOX_TYPES.includes(currentShape.type)) setTool("select");
       setCurrentShape(null);
     }
     dragState.current = { mode: "none", startX: 0, startY: 0 };
@@ -431,7 +504,12 @@ function App() {
       const result = await invoke<{
         path: string;
         sim: { sim_screenshot: string | null; view: string | null; files: string[] };
-      }>("take_screenshot", { path: null });
+      }>("take_screenshot", {
+        path: null,
+        frameRect: frameRef.current
+          ? (() => { const r = frameRef.current!.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; })()
+          : null,
+      });
       setFlash(true);
       setTimeout(() => setFlash(false), 200);
       const src = convertFileSrc(result.path);
@@ -447,14 +525,28 @@ function App() {
     setSelectedId(prev);
   };
 
+  const addShape = (type: Shape["type"]) => {
+    const cx = frameSize.width / 2;
+    const cy = frameSize.height / 2;
+    const w = 100, h = 80;
+    const id = genId();
+    const shape: Shape = { id, type, color, strokeWidth: 2.5, lineStyle, x: cx - w / 2, y: cy - h / 2, width: w, height: h };
+    setShapes((p) => [...p, shape]);
+    setSelectedId(id);
+    setTool("select");
+    setShapesOpen(false);
+  };
+
   const handleColorChange = (c: string) => {
     setColor(c);
     if (selectedId) setShapes((p) => p.map((s) => (s.id === selectedId ? { ...s, color: c } : s)));
   };
 
-  const showToast = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 1200);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showToast = (msg: string, persistent = false) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ msg, persistent });
+    if (!persistent) toastTimer.current = setTimeout(() => setToast(null), 1200);
   };
 
   const handleCollapse = async () => {
@@ -465,7 +557,7 @@ function App() {
       // Save current logical size before collapsing
       const size = await win.innerSize();
       savedSize.current = { width: Math.round(size.width / scale), height: Math.round(size.height / scale) };
-      await win.setSize(new LogicalSize(savedSize.current.width, 56));
+      await win.setSize(new LogicalSize(savedSize.current.width, 80));
       setCollapsed(true);
       showToast("Frame hidden");
     } else {
@@ -478,12 +570,31 @@ function App() {
   };
   const handleClose = () => { getCurrentWindow().close(); };
 
+  const handleAttach = async () => {
+    try {
+      const sim = await invoke<{ x: number; y: number; width: number; height: number; name: string } | null>("get_simulator_window");
+      if (sim) {
+        const { LogicalPosition } = await import("@tauri-apps/api/dpi");
+        const win = getCurrentWindow();
+        await win.setPosition(new LogicalPosition(sim.x - 55, sim.y));
+        // Auto-size frame: ~100% sim width, ~94% sim height
+        setFrameSize({ width: Math.round(sim.width * 1.009), height: Math.round(sim.height * 0.939) });
+        showToast(`${sim.name} — ${sim.width}×${sim.height}`, true);
+      } else {
+        showToast("Simulator not running", true);
+      }
+    } catch (e: any) {
+      showToast(typeof e === "string" ? e : "Simulator not found", true);
+    }
+  };
+
   const cursor = tool === "select" ? "default" : tool === "text" ? "text" : "crosshair";
 
   return (
     <div className="app">
+      {tooltip && <div className="tooltip-bubble" style={{ left: tooltip.x, top: tooltip.y, transform: "translateX(-50%)" }}>{tooltip.text}</div>}
       {flash && <div className="screenshot-flash" />}
-      {toast && !collapsed && <div className="toast">{toast}</div>}
+      {toast && (!collapsed || toast.persistent) && <div className={`toast ${toast.persistent ? "" : "toast-auto"}`} onClick={() => setToast(null)}>{toast.msg}</div>}
       {screenshotInfo && (
         <div className="screenshot-modal" onClick={() => setScreenshotInfo(null)}>
           <div className="screenshot-modal-content" onClick={(e) => e.stopPropagation()}>
@@ -514,37 +625,58 @@ function App() {
 
       <div className={`tool-panel ${collapsed ? "panel-collapsed" : ""}`} data-tauri-drag-region>
         <div className="panel-scroll" data-tauri-drag-region>
-          <button className="panel-btn close-btn" onClick={handleClose} title={"Close\nQuit the annotation tool"}>
+          <button className="panel-btn close-btn" {...tip("Close", true)} onClick={handleClose}>
             <X size={12} strokeWidth={2.5} />
           </button>
-          <button className="panel-btn" onClick={handleCollapse} title={collapsed ? "Show Frame (⌘M)\nExpand the screenshot frame" : "Hide Frame (⌘M)\nCollapse the screenshot frame"}>
+          <button className="panel-btn frame-toggle-btn" {...tip(collapsed ? "Show Frame ⌘M" : "Hide Frame ⌘M", true)} onClick={handleCollapse}>
             {collapsed ? <Maximize2 {...ICON} /> : <Minimize2 {...ICON} />}
           </button>
 
           <span className="panel-sep" />
 
-          <button className={`panel-btn ${tool === "select" ? "active" : ""}`} onClick={() => setTool("select")} title={"Select (S)\nClick to move or resize shapes"}>
+          <button className={`panel-btn ${tool === "select" ? "active" : ""}`} {...tip("Select (S)")} onClick={() => setTool("select")}>
             <MousePointer2 {...ICON} />
           </button>
-          <button className={`panel-btn ${tool === "rect" ? "active" : ""}`} onClick={() => setTool("rect")} title={"Box (B)\nDraw a bounding box on screen"}>
-            <Square {...ICON} />
-          </button>
-          <button className={`panel-btn ${tool === "draw" ? "active" : ""}`} onClick={() => setTool("draw")} title={"Pen (P)\nFreehand draw on the canvas"}>
+          <div className="color-dropdown-wrap">
+            <button className={`panel-btn ${BBOX_TYPES.includes(tool) ? "active" : ""}`} {...tip("Shapes")} onClick={() => setShapesOpen((o) => !o)}>
+              <Shapes {...ICON} />
+            </button>
+            {shapesOpen && (
+              <div className="color-dropdown">
+                <button className="panel-btn" {...tip("Rectangle")} onClick={() => addShape("rect")}>
+                  <Square {...ICON} />
+                </button>
+                <button className="panel-btn" {...tip("Circle")} onClick={() => addShape("circle")}>
+                  <Circle {...ICON} />
+                </button>
+                <button className="panel-btn" {...tip("Arrow")} onClick={() => addShape("arrow")}>
+                  <ArrowUpRight {...ICON} />
+                </button>
+                <button className="panel-btn" {...tip("Line")} onClick={() => addShape("line")}>
+                  <Minus {...ICON} />
+                </button>
+                <button className="panel-btn" {...tip("Triangle")} onClick={() => addShape("triangle")}>
+                  <Triangle {...ICON} />
+                </button>
+              </div>
+            )}
+          </div>
+          <button className={`panel-btn ${tool === "draw" ? "active" : ""}`} {...tip("Pen (P)")} onClick={() => setTool("draw")}>
             <Pencil {...ICON} />
           </button>
-          <button className={`panel-btn ${tool === "text" ? "active" : ""}`} onClick={() => setTool("text")} title={"Text\nClick anywhere to type a note"}>
+          <button className={`panel-btn ${tool === "text" ? "active" : ""}`} {...tip("Text (T)")} onClick={() => setTool("text")}>
             <Type {...ICON} />
           </button>
 
           <span className="panel-sep" />
 
           {/* Line style toggle */}
-          <button className="panel-btn line-style-btn" onClick={() => {
+          <button className="panel-btn line-style-btn" {...tip(`Style: ${lineStyle}`)} onClick={() => {
             const idx = LINE_STYLES.findIndex((ls) => ls.style === lineStyle);
             const next = LINE_STYLES[(idx + 1) % LINE_STYLES.length];
             setLineStyle(next.style);
             if (selectedId) setShapes((p) => p.map((s) => s.id === selectedId ? { ...s, lineStyle: next.style } : s));
-          }} title={`Style: ${lineStyle}\nCycle through dotted, dashed, solid`}>
+          }}>
             <svg width="18" height="10" viewBox="0 0 18 10">
               {lineStyle === "dotted" && <>
                 <circle cx="2" cy="5" r="1.2" fill="currentColor" />
@@ -562,8 +694,7 @@ function App() {
 
           {/* Color dropdown */}
           <div className="color-dropdown-wrap">
-            <button className="panel-btn color-trigger" onClick={() => setColorOpen((o) => !o)}
-              title={"Color\nChoose annotation color"}>
+            <button className="panel-btn color-trigger" {...tip("Color")} onClick={() => setColorOpen((o) => !o)}>
               <span className="color-indicator" style={{ backgroundColor: color }} />
             </button>
             {colorOpen && (
@@ -573,10 +704,10 @@ function App() {
                   return (
                     <button key={c} className={`color-dot ${color === c ? "active" : ""}`} style={{ backgroundColor: c }}
                       onClick={() => { handleColorChange(c); setColorOpen(false); }}
-                      title={`${names[i]}\nUse ${names[i].toLowerCase()} for annotations`} />
+                      {...tip(names[i])} />
                   );
                 })}
-                <label className="color-picker-wrap" title={"Custom\nPick any color from palette"}>
+                <label className="color-picker-wrap" {...tip("Custom")}>
                   <Palette size={14} strokeWidth={2} color="rgba(255,255,255,0.5)" />
                   <input type="color" className="color-picker-input" value={color}
                     onChange={(e) => { handleColorChange(e.target.value); setColorOpen(false); }} />
@@ -588,34 +719,36 @@ function App() {
           <span className="panel-sep" />
 
           {selectedId && (
-            <button className="panel-btn delete-btn" onClick={() => { setShapes((p) => p.filter((s) => s.id !== selectedId)); setSelectedId(null); }}
-              title={"Delete\nRemove the selected shape"}>
+            <button className="panel-btn delete-btn" {...tip("Delete")} onClick={() => { setShapes((p) => p.filter((s) => s.id !== selectedId)); setSelectedId(null); }}>
               <Trash2 size={14} strokeWidth={2} />
             </button>
           )}
-          <button className="panel-btn" onClick={() => { setShapes((p) => p.slice(0, -1)); setSelectedId(null); }}
-            title={"Undo\nRemove the last thing you drew"}>
+          <button className="panel-btn" {...tip("Undo ⌘Z")} onClick={() => { setShapes((p) => p.slice(0, -1)); setSelectedId(null); }}>
             <Undo2 {...ICON} />
           </button>
-          <button className="panel-btn" onClick={() => { setShapes([]); setCurrentShape(null); setSelectedId(null); }}
-            title={"Clear\nWipe all annotations from canvas"}>
+          <button className="panel-btn" {...tip("Clear")} onClick={() => { setShapes([]); setCurrentShape(null); setSelectedId(null); }}>
             <Eraser {...ICON} />
           </button>
 
           <span className="panel-sep" />
 
-          <button className="panel-btn snap-btn" onClick={handleScreenshot}
-            title={"Snap\nCapture canvas area to Desktop"}>
+          <button className="panel-btn snap-btn" {...tip("Snap")} onClick={handleScreenshot}>
             <Camera {...ICON} />
+          </button>
+          <button className="panel-btn" {...tip("Detect Sim")} onClick={handleAttach}>
+            <Smartphone {...ICON} />
           </button>
         </div>
       </div>
 
-      {!collapsed && <div className={`canvas-frame ${focused ? "frame-active" : ""}`} style={{ width: frameSize.width, height: frameSize.height }}>
+      {!collapsed && <div ref={frameRef} className={`canvas-frame ${focused ? "frame-active" : ""}`} style={{ width: frameSize.width, height: frameSize.height }}>
         <canvas ref={canvasRef} style={{ cursor }}
           onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} />
         <div className="frame-resize-handle" onMouseDown={handleFrameResizeStart} />
+        {frameResizingActive && (
+          <div className="frame-size-label">{Math.round(frameSize.width)} × {Math.round(frameSize.height)}</div>
+        )}
         {textInput.visible && (
           <input
             ref={textRef}
@@ -669,7 +802,7 @@ function App() {
               </div>
               {/* Row 2: Style + Delete */}
               <div className="pop-row">
-                {(sel.type === "rect" || sel.type === "draw") && (
+                {(BBOX_TYPES.includes(sel.type) || sel.type === "draw") && (
                   <>
                     {LINE_STYLES.map((ls) => (
                       <button key={ls.style} className={`pop-style ${sel.lineStyle === ls.style ? "active" : ""}`}
