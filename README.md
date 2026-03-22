@@ -83,6 +83,33 @@ Response includes screenshot path, simulator screenshot, current view name, and 
 
 Tauri v2 + React + TypeScript. 5MB. Native macOS. No bloat.
 
+---
+
+## Share
+
+> me building iOS apps in 2025:
+>
+> step 1: open simulator
+> step 2: see bug
+> step 3: draw angry red circle around bug
+> step 4: write "pls fix" on screen
+> step 5: coding agent reads my crayon annotations and actually fixes it
+>
+> i automated the "pointing at the screen" part of iOS development.
+> you're welcome.
+>
+> introducing Fudo — a transparent overlay for your iOS Simulator.
+> draw on it. screenshot it. hand it to your coding agent.
+>
+> your agent finally understands "that thing right there" because
+> you literally drew a red box around it like a kindergartner.
+>
+> the future of human-agent communication is MS Paint energy.
+>
+> open source, 5MB, native macOS, MIT licensed.
+>
+> https://github.com/embit087/Fudo
+
 ## License
 
 MIT
