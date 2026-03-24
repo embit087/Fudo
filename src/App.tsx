@@ -150,6 +150,7 @@ function App() {
   const textJustOpened = useRef(false);
   const savedSize = useRef<{ width: number; height: number } | null>(null);
   const clipboard = useRef<Shape | null>(null);
+  const shapesRef = useRef<HTMLDivElement>(null);
 
   // --- Render ---
   const redraw = useCallback(() => {
@@ -290,6 +291,16 @@ function App() {
     return () => window.removeEventListener("resize", resize);
   }, [redraw]);
 
+  // Close shapes dropdown on click outside
+  useEffect(() => {
+    if (!shapesOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (shapesRef.current && !shapesRef.current.contains(e.target as Node)) setShapesOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [shapesOpen]);
+
   // Track window focus
   useEffect(() => {
     const onFocus = () => setFocused(true);
@@ -419,13 +430,15 @@ function App() {
       return;
     }
 
-    // In drawing modes, check if clicking on an existing shape to select it
-    for (let i = shapes.length - 1; i >= 0; i--) {
-      if (hitShape(shapes[i], pos.x, pos.y)) {
-        setSelectedId(shapes[i].id);
-        setTool("select");
-        dragState.current = { mode: "moving", startX: pos.x, startY: pos.y, snapshot: { ...shapes[i], points: shapes[i].points ? [...shapes[i].points!] : undefined } };
-        return;
+    // In drawing modes (except pen), check if clicking on an existing shape to select it
+    if (tool !== "draw") {
+      for (let i = shapes.length - 1; i >= 0; i--) {
+        if (hitShape(shapes[i], pos.x, pos.y)) {
+          setSelectedId(shapes[i].id);
+          setTool("select");
+          dragState.current = { mode: "moving", startX: pos.x, startY: pos.y, snapshot: { ...shapes[i], points: shapes[i].points ? [...shapes[i].points!] : undefined } };
+          return;
+        }
       }
     }
 
@@ -637,7 +650,7 @@ function App() {
           <button className={`panel-btn ${tool === "select" ? "active" : ""}`} {...tip("Select (S)")} onClick={() => setTool("select")}>
             <MousePointer2 {...ICON} />
           </button>
-          <div className="color-dropdown-wrap">
+          <div className="color-dropdown-wrap" ref={shapesRef}>
             <button className={`panel-btn ${BBOX_TYPES.includes(tool) ? "active" : ""}`} {...tip("Shapes")} onClick={() => setShapesOpen((o) => !o)}>
               <Shapes {...ICON} />
             </button>
