@@ -4,5 +4,7 @@
 <dict>
     <key>NSAppleEventsUsageDescription</key>
     <string>Fudo needs permission to detect the iOS Simulator window position.</string>
+    <key>NSAccessibilityUsageDescription</key>
+    <string>Fudo needs Accessibility access to read Simulator window position and size.</string>
 </dict>
 </plist>
