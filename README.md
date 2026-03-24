@@ -38,17 +38,61 @@ cp -R "src-tauri/target/release/bundle/macos/Fudo.app" /Applications/
 
 Needs macOS, [Rust](https://rustup.rs/), Node 18+.
 
-## Agent setup
+## Agent setup (Claude Code)
 
-### Hook (recommended)
+Three pieces: the fish function, the hook script, and the Claude Code hook config.
 
-Drop [`fudo.fish`](https://github.com/embit087/Fudo/blob/main/fudo.fish) into `~/.config/fish/functions/`. Then just type:
+### 1. Install the fish function
+
+```bash
+cp fudo.fish ~/.config/fish/functions/fudo.fish
+```
+
+This gives you the `fudo` command. It calls the Fudo app API at `localhost:17321/screenshot` when the app is running, or falls back to a plain `xcrun simctl` screenshot.
+
+### 2. Install the hook script
+
+```bash
+# Copy to wherever you keep your scripts
+cp fudo-hook.sh ~/path/to/fudo-hook.sh
+chmod +x ~/path/to/fudo-hook.sh
+```
+
+The hook script listens for prompts starting with `fudo`, runs the fish function, and injects the annotated screenshot + view context into Claude Code's conversation as `additionalContext`.
+
+### 3. Add the hook to Claude Code
+
+Add this to your `~/.claude/settings.json` under `"hooks"` → `"UserPromptSubmit"`:
+
+```json
+{
+  "hooks": [
+    {
+      "type": "command",
+      "command": "/path/to/fudo-hook.sh",
+      "timeout": 15,
+      "statusMessage": "Fudo: capturing screenshot..."
+    }
+  ]
+}
+```
+
+### Usage
+
+With Fudo running and overlaying your simulator, just type in Claude Code:
 
 ```
+fudo fix this area
 fudo what's wrong with this screen?
+fudo the spacing here looks off
 ```
 
-Your agent gets the annotated screenshot + current view + source files. No copy-paste. No drag-and-drop. Just vibes.
+Claude Code automatically receives:
+- The annotated screenshot (with your drawings, boxes, and text)
+- The current view name from the simulator
+- The relevant source files for that view
+
+No copy-paste. No drag-and-drop. Draw on it, ask about it.
 
 ### API
 
@@ -61,11 +105,12 @@ Response includes screenshot path, simulator screenshot, current view name, and 
 
 ### The workflow
 
-1. Human draws on the simulator
-2. Human says `fudo fix this`
-3. Agent sees exactly what the human sees
-4. Agent fixes it
-5. Both pretend it was hard
+1. Open Fudo + iOS Simulator
+2. Draw on the screen — circle a bug, box an area, scribble "ugly"
+3. Type `fudo fix this` in Claude Code
+4. Claude sees exactly what you see — annotations and all
+5. Claude fixes it
+6. Both pretend it was hard
 
 ## Keyboard shortcuts
 

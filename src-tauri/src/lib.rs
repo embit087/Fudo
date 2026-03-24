@@ -135,15 +135,28 @@ fn do_screenshot(handle: &tauri::AppHandle, custom_path: Option<String>, frame_r
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_err(|e| e.to_string())?
                 .as_secs();
-            format!("{}/Desktop/ios-annotate-{}.png", home, ts)
+            format!("{}/Desktop/fudo-{}.png", home, ts)
         }
     };
 
     let region = format!("{},{},{},{}", x, y, w, h);
-    Command::new("screencapture")
+    let output = Command::new("screencapture")
         .args(["-R", &region, &path])
         .output()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("Failed to run screencapture: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("screencapture failed (exit {}): {}", output.status, stderr));
+    }
+
+    // screencapture can exit 0 but produce no file when Screen Recording permission is missing
+    if !std::path::Path::new(&path).exists() {
+        return Err(
+            "Screenshot file not created. Grant Screen Recording permission to Fudo in System Settings > Privacy & Security > Screen Recording, then relaunch."
+                .to_string(),
+        );
+    }
 
     Ok(path)
 }
@@ -247,6 +260,11 @@ fn start_api_server(handle: tauri::AppHandle) {
                             format!(r#"{{"error":"{}"}}"#, e.replace('"', "\\\"")),
                         ),
                     }
+                }
+                "/context" => {
+                    let sim = get_sim_context();
+                    let body = serde_json::to_string(&sim).unwrap_or_default();
+                    ("200 OK", body)
                 }
                 _ => (
                     "404 Not Found",

@@ -703,8 +703,8 @@ function App() {
                   const names = ["Red", "Yellow", "Green", "Blue"];
                   return (
                     <button key={c} className={`color-dot ${color === c ? "active" : ""}`} style={{ backgroundColor: c }}
-                      onClick={() => { handleColorChange(c); setColorOpen(false); }}
-                      {...tip(names[i])} />
+                      {...tip(names[i])}
+                      onClick={() => { handleColorChange(c); setColorOpen(false); }} />
                   );
                 })}
                 <label className="color-picker-wrap" {...tip("Custom")}>

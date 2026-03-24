@@ -525,16 +525,17 @@
   background: rgba(38, 38, 40, 0.98);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
-  border-radius: 16px;
-  padding: 16px;
+  border-radius: 12px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   box-shadow: none;
   border: none;
-  max-width: 92%;
-  max-height: 85%;
+  max-width: min(90vw, 340px);
+  max-height: 55vh;
+  overflow: hidden;
   animation: modal-in 0.2s ease-out;
 }
 
@@ -545,15 +546,18 @@
 
 .screenshot-previews {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   align-items: flex-start;
+  flex: 1;
+  min-height: 0;
   max-width: 100%;
+  overflow: hidden;
 }
 
 .screenshot-preview {
   max-width: 100%;
-  max-height: 240px;
-  border-radius: 8px;
+  max-height: min(30vh, 200px);
+  border-radius: 6px;
   object-fit: contain;
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
@@ -592,14 +596,15 @@
 
 .screenshot-files {
   color: rgba(255, 255, 255, 0.5);
-  font: 11px/1.6 -apple-system, BlinkMacSystemFont, monospace;
+  font: 10px/1.4 -apple-system, BlinkMacSystemFont, monospace;
   text-align: left;
   width: 100%;
-  max-height: 100px;
+  max-height: 60px;
   overflow-y: auto;
   background: rgba(0, 0, 0, 0.2);
   border-radius: 6px;
-  padding: 6px 8px;
+  padding: 4px 6px;
+  flex-shrink: 0;
 }
 
 .screenshot-files .context-label {

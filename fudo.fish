@@ -1,5 +1,5 @@
 function fudo
-    # If ios-annotate app is running, use its API
+    # If fudo app is running, use its API
     set -l api_response (curl -s --connect-timeout 1 http://localhost:17321/screenshot 2>/dev/null)
     if test $status -eq 0; and string match -q '*"path"*' -- "$api_response"
         set -l annotated_path (string match -r '"path":"([^"]+)"' -- "$api_response")[2]
