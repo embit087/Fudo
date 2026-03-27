@@ -589,10 +589,13 @@ function App() {
       if (sim) {
         const { LogicalPosition } = await import("@tauri-apps/api/dpi");
         const win = getCurrentWindow();
-        await win.setPosition(new LogicalPosition(sim.x - 55, sim.y));
+        await win.setPosition(new LogicalPosition(sim.x - 70, sim.y));
         // Auto-size frame: ~100% sim width, ~94% sim height
         setFrameSize({ width: Math.round(sim.width * 1.009), height: Math.round(sim.height * 0.939) });
-        showToast(`${sim.name} — ${sim.width}×${sim.height}`, true);
+        // Arrange window layers: Fudo on top, Simulator second
+        const layout = await invoke<{ windows: Array<{ app: string; title: string; x: number; y: number; width: number; height: number }>; arranged: boolean }>("arrange_desktop_layout");
+        const winCount = layout.windows.length;
+        showToast(`${sim.name} — ${sim.width}×${sim.height} · ${winCount} windows`);
       } else {
         showToast("Simulator not running", true);
       }

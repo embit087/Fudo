@@ -292,6 +292,22 @@ struct SimulatorWindow {
     name: String,
 }
 
+#[derive(Serialize, Clone)]
+struct DesktopWindow {
+    app: String,
+    title: String,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+}
+
+#[derive(Serialize, Clone)]
+struct DesktopLayout {
+    windows: Vec<DesktopWindow>,
+    arranged: bool,
+}
+
 #[tauri::command]
 fn get_simulator_window() -> Result<Option<SimulatorWindow>, String> {
     let output = Command::new("osascript")
@@ -342,7 +358,7 @@ async fn attach_to_simulator(app: tauri::AppHandle) -> Result<SimulatorWindow, S
     let scale = window.scale_factor().map_err(|e| e.to_string())?;
 
     // Position Fudo window at the simulator's position
-    let phys_x = (sim.x as f64 * scale) as i32;
+    let phys_x = ((sim.x + 25) as f64 * scale) as i32;
     let phys_y = (sim.y as f64 * scale) as i32;
     window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(phys_x, phys_y)))
         .map_err(|e| e.to_string())?;
@@ -354,6 +370,94 @@ async fn attach_to_simulator(app: tauri::AppHandle) -> Result<SimulatorWindow, S
         .map_err(|e| e.to_string())?;
 
     Ok(sim)
+}
+
+#[tauri::command]
+fn arrange_desktop_layout() -> Result<DesktopLayout, String> {
+    // Single lightweight AppleScript: only query Simulator and Fudo, then arrange layers
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(r#"tell application "System Events"
+    set result to ""
+    set hasSim to exists process "Simulator"
+    set hasFudo to exists process "Fudo"
+
+    if hasSim then
+        try
+            tell process "Simulator"
+                repeat with win in windows
+                    set {x, y} to position of win
+                    set {w, h} to size of win
+                    set winName to name of win
+                    set result to result & "Simulator|||" & winName & "|||" & x & "," & y & "," & w & "," & h & (ASCII character 10)
+                end repeat
+            end tell
+        end try
+    end if
+
+    if hasFudo then
+        try
+            tell process "Fudo"
+                repeat with win in windows
+                    set {x, y} to position of win
+                    set {w, h} to size of win
+                    set winName to name of win
+                    set result to result & "Fudo|||" & winName & "|||" & x & "," & y & "," & w & "," & h & (ASCII character 10)
+                end repeat
+            end tell
+        end try
+    end if
+
+    -- Arrange layers: Simulator second, Fudo on top
+    if hasSim then
+        set frontmost of process "Simulator" to true
+        delay 0.1
+    end if
+    if hasFudo then
+        set frontmost of process "Fudo" to true
+    end if
+
+    return result
+end tell"#)
+        .output()
+        .map_err(|e| format!("Failed to arrange windows: {}", e))?;
+
+    let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let mut windows = Vec::new();
+    let mut has_simulator = false;
+
+    for line in raw.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = line.splitn(3, "|||").collect();
+        if parts.len() < 3 {
+            continue;
+        }
+        let app = parts[0].to_string();
+        let title = parts[1].to_string();
+        let coords: Vec<&str> = parts[2].split(',').collect();
+        if coords.len() < 4 {
+            continue;
+        }
+        if app == "Simulator" {
+            has_simulator = true;
+        }
+        windows.push(DesktopWindow {
+            app,
+            title,
+            x: coords[0].trim().parse().unwrap_or(0),
+            y: coords[1].trim().parse().unwrap_or(0),
+            width: coords[2].trim().parse().unwrap_or(0),
+            height: coords[3].trim().parse().unwrap_or(0),
+        });
+    }
+
+    Ok(DesktopLayout {
+        windows,
+        arranged: has_simulator,
+    })
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -376,7 +480,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![take_screenshot, get_simulator_window, attach_to_simulator])
+        .invoke_handler(tauri::generate_handler![take_screenshot, get_simulator_window, attach_to_simulator, arrange_desktop_layout])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
