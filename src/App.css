@@ -344,133 +344,6 @@
   caret-color: currentColor;
 }
 
-/* --- Shape popover --- */
-.shape-popover {
-  position: absolute;
-  transform: translate(-50%, -100%);
-  background: rgba(38, 38, 40, 0.96);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: none;
-  border-radius: 12px;
-  padding: 8px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  box-shadow: none;
-  z-index: 30;
-  white-space: nowrap;
-  animation: popover-in 0.12s ease-out;
-}
-
-@keyframes popover-in {
-  from { opacity: 0; transform: translate(-50%, calc(-100% + 4px)); }
-  to { opacity: 1; transform: translate(-50%, -100%); }
-}
-
-.pop-row {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.pop-color {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 2.5px solid transparent;
-  cursor: pointer;
-  padding: 0;
-  flex-shrink: 0;
-  transition: border-color 0.1s, transform 0.08s, box-shadow 0.1s;
-}
-
-.pop-color:hover {
-  transform: scale(1.18);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
-}
-
-.pop-color.active {
-  border-color: #fff;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15), 0 2px 6px rgba(0, 0, 0, 0.2);
-}
-
-.pop-custom-color {
-  width: 22px;
-  height: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  position: relative;
-  flex-shrink: 0;
-  border-radius: 50%;
-  transition: background 0.1s;
-}
-
-.pop-custom-color:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.pop-sep {
-  width: 1px;
-  height: 18px;
-  background: rgba(255, 255, 255, 0.08);
-  flex-shrink: 0;
-  margin: 0 2px;
-}
-
-.pop-hsep {
-  width: 100%;
-  height: 1px;
-  background: rgba(255, 255, 255, 0.06);
-  margin: 0;
-}
-
-.pop-style {
-  width: 28px;
-  height: 24px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  flex-shrink: 0;
-  transition: background 0.1s;
-}
-
-.pop-style:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.pop-style.active {
-  background: rgba(0, 122, 255, 0.4);
-}
-
-.pop-delete {
-  height: 24px;
-  min-width: 24px;
-  border: none;
-  border-radius: 6px;
-  background: rgba(255, 69, 58, 0.12);
-  color: #ff6961;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 8px;
-  gap: 4px;
-  flex-shrink: 0;
-  transition: background 0.1s;
-  font: 500 10px/1 -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-.pop-delete:hover {
-  background: rgba(255, 69, 58, 0.25);
-}
 
 /* --- Line style button --- */
 .line-style-btn {
@@ -505,6 +378,58 @@
   0% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
   70% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
   100% { opacity: 0; transform: translate(-50%, -50%) scale(0.95); }
+}
+
+/* --- Multi-frame bar --- */
+.multi-frame-bar {
+  background: rgba(28, 28, 30, 0.97);
+  border-radius: 10px;
+  margin: 3px 6px 0;
+  padding: 5px 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: center;
+  width: max-content;
+  animation: dropdown-in 0.15s ease-out;
+}
+
+.multi-frame-count {
+  color: rgba(255, 255, 255, 0.7);
+  font: 600 11px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+  padding: 0 6px;
+}
+
+.capture-btn {
+  background: rgba(52, 199, 89, 0.35) !important;
+  color: #fff !important;
+  padding: 0 10px !important;
+  font: 600 11px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.capture-btn:hover {
+  background: rgba(52, 199, 89, 0.55) !important;
+}
+
+.done-btn {
+  background: rgba(0, 122, 255, 0.35) !important;
+  color: #fff !important;
+  padding: 0 10px !important;
+  font: 600 11px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.done-btn:hover {
+  background: rgba(0, 122, 255, 0.55) !important;
+}
+
+.cancel-btn {
+  color: rgba(255, 255, 255, 0.45) !important;
+  padding: 0 8px !important;
+  font: 600 11px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.cancel-btn:hover {
+  color: rgba(255, 255, 255, 0.7) !important;
 }
 
 /* --- Screenshot modal --- */

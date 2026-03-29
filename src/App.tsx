@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   MousePointer2,
@@ -20,6 +21,8 @@ import {
   Triangle,
   Shapes,
   Smartphone,
+  Hash,
+  Film,
 } from "lucide-react";
 import "./App.css";
 
@@ -122,6 +125,13 @@ function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [colorOpen, setColorOpen] = useState(false);
   const [shapesOpen, setShapesOpen] = useState(false);
+  const [showIndices, setShowIndices] = useState(false);
+  const [snapMenuOpen, setSnapMenuOpen] = useState(false);
+  const [multiFrameMode, setMultiFrameMode] = useState(false);
+  const [multiFrames, setMultiFrames] = useState<Array<{
+    path: string;
+    sim: { sim_screenshot: string | null; view: string | null; files: string[] };
+  }>>([]);
   const [tooltip, setTooltip] = useState<{ text: string; x: number; y: number } | null>(null);
 
   const tip = (text: string, forceEnabled?: boolean) => ({
@@ -151,6 +161,7 @@ function App() {
   const savedSize = useRef<{ width: number; height: number } | null>(null);
   const clipboard = useRef<Shape | null>(null);
   const shapesRef = useRef<HTMLDivElement>(null);
+  const snapMenuRef = useRef<HTMLDivElement>(null);
 
   // --- Render ---
   const redraw = useCallback(() => {
@@ -269,8 +280,40 @@ function App() {
       }
       ctx.restore();
     }
+
+    // Draw index badges on shapes
+    if (showIndices) {
+      for (let i = 0; i < shapes.length; i++) {
+        const shape = shapes[i];
+        let cx: number, cy: number;
+        if (BBOX_TYPES.includes(shape.type)) {
+          const { x, y } = normalizeRect(shape);
+          cx = x; cy = y;
+        } else if (shape.type === "draw" && shape.points?.length) {
+          let mnX = Infinity, mnY = Infinity;
+          for (const p of shape.points) { mnX = Math.min(mnX, p.x); mnY = Math.min(mnY, p.y); }
+          cx = mnX; cy = mnY;
+        } else if (shape.type === "text") {
+          cx = shape.x; cy = shape.y - 16;
+        } else continue;
+        const label = `${i + 1}`;
+        const r = 9;
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fillStyle = shape.color;
+        ctx.fill();
+        ctx.font = "bold 10px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.fillStyle = "#FFF";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(label, cx, cy);
+        ctx.restore();
+      }
+    }
+
     ctx.restore();
-  }, [shapes, currentShape, selectedId]);
+  }, [shapes, currentShape, selectedId, collapsed, showIndices]);
 
   useEffect(() => { redraw(); }, [redraw]);
 
@@ -301,6 +344,16 @@ function App() {
     return () => document.removeEventListener("mousedown", onClick);
   }, [shapesOpen]);
 
+  // Close snap menu on click outside
+  useEffect(() => {
+    if (!snapMenuOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (snapMenuRef.current && !snapMenuRef.current.contains(e.target as Node)) setSnapMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [snapMenuOpen]);
+
   // Track window focus
   useEffect(() => {
     const onFocus = () => setFocused(true);
@@ -308,6 +361,25 @@ function App() {
     window.addEventListener("focus", onFocus);
     window.addEventListener("blur", onBlur);
     return () => { window.removeEventListener("focus", onFocus); window.removeEventListener("blur", onBlur); };
+  }, []);
+
+  // Listen for CLI-triggered screenshots and show quick preview
+  useEffect(() => {
+    const unlisten = listen<{ path: string; sim: { sim_screenshot: string | null; view: string | null; files: string[] } }>("screenshot-taken", (event) => {
+      const r = event.payload;
+      setFlash(true);
+      setTimeout(() => setFlash(false), 200);
+      const src = convertFileSrc(r.path);
+      setScreenshotInfo({
+        path: r.path,
+        src,
+        simScreenshot: r.sim.sim_screenshot ? convertFileSrc(r.sim.sim_screenshot) : undefined,
+        view: r.sim.view ?? undefined,
+        files: r.sim.files.length > 0 ? r.sim.files : undefined,
+      });
+      setTimeout(() => setScreenshotInfo(null), 1500);
+    });
+    return () => { unlisten.then((f) => f()); };
   }, []);
 
   // Focus text input when it becomes visible
@@ -422,6 +494,8 @@ function App() {
       for (let i = shapes.length - 1; i >= 0; i--) {
         if (hitShape(shapes[i], pos.x, pos.y)) {
           setSelectedId(shapes[i].id);
+          setColor(shapes[i].color);
+          setLineStyle(shapes[i].lineStyle);
           dragState.current = { mode: "moving", startX: pos.x, startY: pos.y, snapshot: { ...shapes[i], points: shapes[i].points ? [...shapes[i].points!] : undefined } };
           return;
         }
@@ -435,6 +509,8 @@ function App() {
       for (let i = shapes.length - 1; i >= 0; i--) {
         if (hitShape(shapes[i], pos.x, pos.y)) {
           setSelectedId(shapes[i].id);
+          setColor(shapes[i].color);
+          setLineStyle(shapes[i].lineStyle);
           setTool("select");
           dragState.current = { mode: "moving", startX: pos.x, startY: pos.y, snapshot: { ...shapes[i], points: shapes[i].points ? [...shapes[i].points!] : undefined } };
           return;
@@ -536,6 +612,49 @@ function App() {
       setTimeout(() => setScreenshotInfo(null), 8000);
     } catch (e) { console.error("Screenshot failed:", e); }
     setSelectedId(prev);
+  };
+
+  const handleMultiCapture = async () => {
+    setSelectedId(null);
+    await new Promise((r) => setTimeout(r, 60));
+    try {
+      const result = await invoke<{
+        path: string;
+        sim: { sim_screenshot: string | null; view: string | null; files: string[] };
+      }>("take_screenshot", {
+        path: null,
+        frameRect: frameRef.current
+          ? (() => { const r = frameRef.current!.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; })()
+          : null,
+      });
+      setFlash(true);
+      setTimeout(() => setFlash(false), 200);
+      setMultiFrames((prev) => [...prev, result]);
+      setShapes([]);
+      setCurrentShape(null);
+      setSelectedId(null);
+      showToast(`Frame ${multiFrames.length + 1} captured`);
+    } catch (e) { console.error("Multi-frame capture failed:", e); }
+  };
+
+  const handleMultiDone = async () => {
+    if (multiFrames.length === 0) {
+      showToast("No frames captured");
+      setMultiFrameMode(false);
+      return;
+    }
+    try {
+      await invoke("store_multi_frame_results", { results: multiFrames });
+      showToast(`${multiFrames.length} frames saved`);
+    } catch (e) { console.error("Failed to store multi-frame results:", e); }
+    setMultiFrameMode(false);
+    setMultiFrames([]);
+  };
+
+  const handleMultiCancel = () => {
+    setMultiFrameMode(false);
+    setMultiFrames([]);
+    showToast("Multi-frame cancelled");
   };
 
   const addShape = (type: Shape["type"]) => {
@@ -674,6 +793,10 @@ function App() {
                 <button className="panel-btn" {...tip("Triangle")} onClick={() => addShape("triangle")}>
                   <Triangle {...ICON} />
                 </button>
+                <span className="panel-sep" />
+                <button className={`panel-btn ${showIndices ? "active" : ""}`} {...tip("Index #")} onClick={() => setShowIndices((v) => !v)}>
+                  <Hash {...ICON} />
+                </button>
               </div>
             )}
           </div>
@@ -748,14 +871,35 @@ function App() {
 
           <span className="panel-sep" />
 
-          <button className="panel-btn snap-btn" {...tip("Snap")} onClick={handleScreenshot}>
-            <Camera {...ICON} />
-          </button>
+          <div className="color-dropdown-wrap" ref={snapMenuRef}>
+            <button className="panel-btn snap-btn" {...tip("Snap")} onClick={() => setSnapMenuOpen((o) => !o)}>
+              <Camera {...ICON} />
+            </button>
+            {snapMenuOpen && (
+              <div className="color-dropdown">
+                <button className="panel-btn" {...tip("Single Frame")} onClick={() => { handleScreenshot(); setSnapMenuOpen(false); }}>
+                  <Camera {...ICON} />
+                </button>
+                <button className="panel-btn" {...tip("Multi Frame")} onClick={() => { setMultiFrameMode(true); setMultiFrames([]); setSnapMenuOpen(false); }}>
+                  <Film {...ICON} />
+                </button>
+              </div>
+            )}
+          </div>
           <button className="panel-btn" {...tip("Detect Sim")} onClick={handleAttach}>
             <Smartphone {...ICON} />
           </button>
         </div>
       </div>
+
+      {multiFrameMode && (
+        <div className="multi-frame-bar">
+          <span className="multi-frame-count">{multiFrames.length} frame{multiFrames.length !== 1 ? "s" : ""}</span>
+          <button className="panel-btn capture-btn" onClick={handleMultiCapture}>Capture</button>
+          <button className="panel-btn done-btn" onClick={handleMultiDone}>Done</button>
+          <button className="panel-btn cancel-btn" onClick={handleMultiCancel}>Cancel</button>
+        </div>
+      )}
 
       {!collapsed && <div ref={frameRef} className={`canvas-frame ${focused ? "frame-active" : ""}`} style={{ width: frameSize.width, height: frameSize.height }}>
         <canvas ref={canvasRef} style={{ cursor }}
@@ -779,69 +923,6 @@ function App() {
             onBlur={handleTextBlur}
           />
         )}
-        {/* Contextual popover near selected shape */}
-        {selectedId && (() => {
-          const sel = shapes.find((s) => s.id === selectedId);
-          if (!sel) return null;
-          let px: number, py: number;
-          if (sel.type === "rect") {
-            const nr = normalizeRect(sel);
-            px = nr.x + nr.w / 2;
-            py = nr.y - 10;
-          } else if (sel.type === "draw" && sel.points?.length) {
-            let minY = Infinity, sumX = 0;
-            for (const p of sel.points) { minY = Math.min(minY, p.y); sumX += p.x; }
-            px = sumX / sel.points.length;
-            py = minY - 10;
-          } else if (sel.type === "text" && sel.text) {
-            const tw = sel.text.length * 9 + 10;
-            px = sel.x + tw / 2;
-            py = sel.y - 28;
-          } else {
-            px = sel.x;
-            py = sel.y - 28;
-          }
-          return (
-            <div className="shape-popover" style={{ left: px, top: py }}
-              onMouseDown={(e) => e.stopPropagation()}>
-              {/* Row 1: Colors */}
-              <div className="pop-row">
-                {COLORS.map((c) => (
-                  <button key={c} className={`pop-color ${sel.color === c ? "active" : ""}`} style={{ backgroundColor: c }}
-                    onClick={() => handleColorChange(c)} />
-                ))}
-                <label className="pop-custom-color" title="Custom color">
-                  <Palette size={12} strokeWidth={2} color="rgba(255,255,255,0.5)" />
-                  <input type="color" className="color-picker-input" value={sel.color}
-                    onChange={(e) => handleColorChange(e.target.value)} />
-                </label>
-              </div>
-              {/* Row 2: Style + Delete */}
-              <div className="pop-row">
-                {(BBOX_TYPES.includes(sel.type) || sel.type === "draw") && (
-                  <>
-                    {LINE_STYLES.map((ls) => (
-                      <button key={ls.style} className={`pop-style ${sel.lineStyle === ls.style ? "active" : ""}`}
-                        onClick={() => { setLineStyle(ls.style); setShapes((p) => p.map((s) => s.id === selectedId ? { ...s, lineStyle: ls.style } : s)); }}
-                        title={ls.label}>
-                        <svg width="16" height="6" viewBox="0 0 16 6">
-                          {ls.style === "dotted" && <><circle cx="1" cy="3" r="1.2" fill="rgba(255,255,255,0.8)"/><circle cx="5.5" cy="3" r="1.2" fill="rgba(255,255,255,0.8)"/><circle cx="10" cy="3" r="1.2" fill="rgba(255,255,255,0.8)"/><circle cx="14.5" cy="3" r="1.2" fill="rgba(255,255,255,0.8)"/></>}
-                          {ls.style === "dashed" && <><line x1="0" y1="3" x2="5" y2="3" stroke="rgba(255,255,255,0.8)" strokeWidth="2"/><line x1="8" y1="3" x2="13" y2="3" stroke="rgba(255,255,255,0.8)" strokeWidth="2"/></>}
-                          {ls.style === "solid" && <line x1="0" y1="3" x2="16" y2="3" stroke="rgba(255,255,255,0.8)" strokeWidth="2"/>}
-                        </svg>
-                      </button>
-                    ))}
-                    <span className="pop-sep" />
-                  </>
-                )}
-                <button className="pop-delete" onClick={() => { setShapes((p) => p.filter((s) => s.id !== selectedId)); setSelectedId(null); }}
-                  title="Delete selected">
-                  <Trash2 size={11} strokeWidth={2} />
-                </button>
-              </div>
-            </div>
-          );
-        })()}
       </div>}
     </div>
   );

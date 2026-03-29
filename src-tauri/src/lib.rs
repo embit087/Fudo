@@ -1,15 +1,16 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::process::Command;
-use tauri::Manager;
+use std::sync::Mutex;
+use tauri::{Emitter, Manager};
 
 const API_PORT: u16 = 17321;
 const TOOLBAR_HEIGHT: f64 = 48.0;
 const APP_BUNDLE_ID: &str = "com.objsinc.shizuku";
 const PROJECT_ROOT: &str = "/Users/objsinc-macair-00/embitious/shizuku-project/shizuku-app";
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 struct SimContext {
     sim_screenshot: Option<String>,
     view: Option<String>,
@@ -91,10 +92,14 @@ fn get_sim_context() -> SimContext {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct ScreenshotResult {
     path: String,
     sim: SimContext,
+}
+
+struct MultiFrameStore {
+    results: Mutex<Vec<ScreenshotResult>>,
 }
 
 fn get_window_geometry(handle: &tauri::AppHandle) -> Result<(i32, i32, u32, u32), String> {
@@ -169,6 +174,16 @@ fn take_screenshot(app: tauri::AppHandle, path: Option<String>, frame_rect: Opti
         path: screenshot_path,
         sim,
     })
+}
+
+#[tauri::command]
+fn store_multi_frame_results(
+    state: tauri::State<'_, MultiFrameStore>,
+    results: Vec<ScreenshotResult>,
+) -> Result<(), String> {
+    let mut store = state.results.lock().map_err(|e| e.to_string())?;
+    *store = results;
+    Ok(())
 }
 
 fn percent_decode(input: &str) -> String {
@@ -252,6 +267,7 @@ fn start_api_server(handle: tauri::AppHandle) {
                         Ok(p) => {
                             let sim = get_sim_context();
                             let result = ScreenshotResult { path: p, sim };
+                            let _ = handle.emit("screenshot-taken", &result);
                             let body = serde_json::to_string(&result).unwrap_or_default();
                             ("200 OK", body)
                         },
@@ -260,6 +276,13 @@ fn start_api_server(handle: tauri::AppHandle) {
                             format!(r#"{{"error":"{}"}}"#, e.replace('"', "\\\"")),
                         ),
                     }
+                }
+                "/screenshots" => {
+                    let state = handle.state::<MultiFrameStore>();
+                    let mut store = state.results.lock().unwrap_or_else(|e| e.into_inner());
+                    let results: Vec<ScreenshotResult> = store.drain(..).collect();
+                    let body = serde_json::to_string(&results).unwrap_or_default();
+                    ("200 OK", body)
                 }
                 "/context" => {
                     let sim = get_sim_context();
@@ -463,6 +486,9 @@ end tell"#)
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(MultiFrameStore {
+            results: Mutex::new(Vec::new()),
+        })
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -480,7 +506,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![take_screenshot, get_simulator_window, attach_to_simulator, arrange_desktop_layout])
+        .invoke_handler(tauri::generate_handler![take_screenshot, get_simulator_window, attach_to_simulator, arrange_desktop_layout, store_multi_frame_results])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
