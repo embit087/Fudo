@@ -720,7 +720,7 @@ function App() {
       // Save current logical size before collapsing
       const size = await win.innerSize();
       savedSize.current = { width: Math.round(size.width / scale), height: Math.round(size.height / scale) };
-      await win.setSize(new LogicalSize(savedSize.current.width, 80));
+      await win.setSize(new LogicalSize(148, 80));
       setCollapsed(true);
       showToast("Frame hidden");
     } else {
