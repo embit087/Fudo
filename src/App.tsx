@@ -65,7 +65,7 @@ interface DragState {
 const COLORS = ["#FF3B30", "#FFCC00", "#34C759", "#007AFF"];
 const HANDLE_SIZE = 6;
 const HANDLE_HIT = 10;
-const ICON = { size: 15, strokeWidth: 2 };
+const ICON = { size: 17, strokeWidth: 2 };
 
 let idCounter = 0;
 function genId() { return `s${++idCounter}`; }
@@ -128,10 +128,17 @@ function App() {
   const [showIndices, setShowIndices] = useState(false);
   const [snapMenuOpen, setSnapMenuOpen] = useState(false);
   const [multiFrameMode, setMultiFrameMode] = useState(false);
+  const [capturing, setCapturing] = useState(false);
   const [multiFrames, setMultiFrames] = useState<Array<{
     path: string;
     sim: { sim_screenshot: string | null; view: string | null; files: string[] };
   }>>([]);
+  const [multiScreenshotInfo, setMultiScreenshotInfo] = useState<Array<{
+    path: string;
+    src: string;
+    view?: string;
+    files?: string[];
+  }> | null>(null);
   const [tooltip, setTooltip] = useState<{ text: string; x: number; y: number } | null>(null);
 
   const tip = (text: string, forceEnabled?: boolean) => ({
@@ -247,8 +254,12 @@ function App() {
         ctx.setLineDash([]);
       } else if (shape.type === "text" && shape.text) {
         ctx.font = "bold 16px -apple-system, BlinkMacSystemFont, sans-serif";
-        ctx.shadowColor = "rgba(0,0,0,0.5)";
-        ctx.shadowBlur = 3;
+        ctx.shadowColor = "rgba(0,0,0,0.6)";
+        ctx.shadowBlur = 4;
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "rgba(0,0,0,0.7)";
+        ctx.lineJoin = "round";
+        ctx.strokeText(shape.text, shape.x, shape.y);
         ctx.fillText(shape.text, shape.x, shape.y);
       }
 
@@ -378,6 +389,24 @@ function App() {
         files: r.sim.files.length > 0 ? r.sim.files : undefined,
       });
       setTimeout(() => setScreenshotInfo(null), 1500);
+    });
+    return () => { unlisten.then((f) => f()); };
+  }, []);
+
+  // Listen for CLI-triggered multi-frame retrieval
+  useEffect(() => {
+    const unlisten = listen<Array<{ path: string; sim: { sim_screenshot: string | null; view: string | null; files: string[] } }>>("multi-screenshots-taken", (event) => {
+      const results = event.payload;
+      if (results.length === 0) return;
+      setFlash(true);
+      setTimeout(() => setFlash(false), 200);
+      setMultiScreenshotInfo(results.map((r) => ({
+        path: r.path,
+        src: convertFileSrc(r.path),
+        view: r.sim.view ?? undefined,
+        files: r.sim.files.length > 0 ? r.sim.files : undefined,
+      })));
+      setTimeout(() => setMultiScreenshotInfo(null), 3000);
     });
     return () => { unlisten.then((f) => f()); };
   }, []);
@@ -616,6 +645,7 @@ function App() {
 
   const handleMultiCapture = async () => {
     setSelectedId(null);
+    setCapturing(true);
     await new Promise((r) => setTimeout(r, 60));
     try {
       const result = await invoke<{
@@ -635,6 +665,7 @@ function App() {
       setSelectedId(null);
       showToast(`Frame ${multiFrames.length + 1} captured`);
     } catch (e) { console.error("Multi-frame capture failed:", e); }
+    setCapturing(false);
   };
 
   const handleMultiDone = async () => {
@@ -702,16 +733,16 @@ function App() {
   };
   const handleClose = () => { getCurrentWindow().close(); };
 
+  const [simLoading, setSimLoading] = useState(false);
   const handleAttach = async () => {
+    setSimLoading(true);
     try {
       const sim = await invoke<{ x: number; y: number; width: number; height: number; name: string } | null>("get_simulator_window");
       if (sim) {
         const { LogicalPosition } = await import("@tauri-apps/api/dpi");
         const win = getCurrentWindow();
         await win.setPosition(new LogicalPosition(sim.x - 70, sim.y));
-        // Auto-size frame: ~100% sim width, ~94% sim height
         setFrameSize({ width: Math.round(sim.width * 1.009), height: Math.round(sim.height * 0.939) });
-        // Arrange window layers: Fudo on top, Simulator second
         const layout = await invoke<{ windows: Array<{ app: string; title: string; x: number; y: number; width: number; height: number }>; arranged: boolean }>("arrange_desktop_layout");
         const winCount = layout.windows.length;
         showToast(`${sim.name} — ${sim.width}×${sim.height} · ${winCount} windows`);
@@ -721,6 +752,7 @@ function App() {
     } catch (e: any) {
       showToast(typeof e === "string" ? e : "Simulator not found", true);
     }
+    setSimLoading(false);
   };
 
   const cursor = tool === "select" ? "default" : tool === "text" ? "text" : "crosshair";
@@ -757,6 +789,22 @@ function App() {
           </div>
         </div>
       )}
+      {multiScreenshotInfo && (
+        <div className="screenshot-modal" onClick={() => setMultiScreenshotInfo(null)}>
+          <div className="screenshot-modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="multi-screenshot-grid">
+              {multiScreenshotInfo.map((frame, i) => (
+                <div key={i} className="multi-screenshot-frame">
+                  <img src={frame.src} alt={`Frame ${i + 1}`} className="screenshot-preview" />
+                  <div className="screenshot-path">Frame {i + 1}: {frame.path}</div>
+                  {frame.view && <div className="screenshot-context"><span className="context-label">View:</span> {frame.view}</div>}
+                </div>
+              ))}
+            </div>
+            <button className="screenshot-dismiss" onClick={() => setMultiScreenshotInfo(null)}>OK</button>
+          </div>
+        </div>
+      )}
 
       <div className={`tool-panel ${collapsed ? "panel-collapsed" : ""}`} data-tauri-drag-region>
         <div className="panel-scroll" data-tauri-drag-region>
@@ -767,132 +815,142 @@ function App() {
             {collapsed ? <Maximize2 {...ICON} /> : <Minimize2 {...ICON} />}
           </button>
 
-          <span className="panel-sep" />
+          {collapsed ? (
+            <>
+              <button className={`panel-btn ${simLoading ? "sim-loading" : ""}`} {...tip("Detect Sim", true)} onClick={handleAttach} disabled={simLoading}>
+                <Smartphone {...ICON} />
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="panel-sep" />
 
-          <button className={`panel-btn ${tool === "select" ? "active" : ""}`} {...tip("Select (S)")} onClick={() => setTool("select")}>
-            <MousePointer2 {...ICON} />
-          </button>
-          <div className="color-dropdown-wrap" ref={shapesRef}>
-            <button className={`panel-btn ${BBOX_TYPES.includes(tool) ? "active" : ""}`} {...tip("Shapes")} onClick={() => setShapesOpen((o) => !o)}>
-              <Shapes {...ICON} />
-            </button>
-            {shapesOpen && (
-              <div className="color-dropdown">
-                <button className="panel-btn" {...tip("Rectangle")} onClick={() => addShape("rect")}>
-                  <Square {...ICON} />
+              <button className={`panel-btn ${tool === "select" ? "active" : ""}`} {...tip("Select (S)")} onClick={() => setTool("select")}>
+                <MousePointer2 {...ICON} />
+              </button>
+              <div className="color-dropdown-wrap" ref={shapesRef}>
+                <button className={`panel-btn ${BBOX_TYPES.includes(tool) ? "active" : ""}`} {...tip("Shapes")} onClick={() => setShapesOpen((o) => !o)}>
+                  <Shapes {...ICON} />
                 </button>
-                <button className="panel-btn" {...tip("Circle")} onClick={() => addShape("circle")}>
-                  <Circle {...ICON} />
-                </button>
-                <button className="panel-btn" {...tip("Arrow")} onClick={() => addShape("arrow")}>
-                  <ArrowUpRight {...ICON} />
-                </button>
-                <button className="panel-btn" {...tip("Line")} onClick={() => addShape("line")}>
-                  <Minus {...ICON} />
-                </button>
-                <button className="panel-btn" {...tip("Triangle")} onClick={() => addShape("triangle")}>
-                  <Triangle {...ICON} />
-                </button>
-                <span className="panel-sep" />
-                <button className={`panel-btn ${showIndices ? "active" : ""}`} {...tip("Index #")} onClick={() => setShowIndices((v) => !v)}>
-                  <Hash {...ICON} />
-                </button>
+                {shapesOpen && (
+                  <div className="color-dropdown">
+                    <button className="panel-btn" {...tip("Rectangle")} onClick={() => addShape("rect")}>
+                      <Square {...ICON} />
+                    </button>
+                    <button className="panel-btn" {...tip("Circle")} onClick={() => addShape("circle")}>
+                      <Circle {...ICON} />
+                    </button>
+                    <button className="panel-btn" {...tip("Arrow")} onClick={() => addShape("arrow")}>
+                      <ArrowUpRight {...ICON} />
+                    </button>
+                    <button className="panel-btn" {...tip("Line")} onClick={() => addShape("line")}>
+                      <Minus {...ICON} />
+                    </button>
+                    <button className="panel-btn" {...tip("Triangle")} onClick={() => addShape("triangle")}>
+                      <Triangle {...ICON} />
+                    </button>
+                    <span className="panel-sep" />
+                    <button className={`panel-btn ${showIndices ? "active" : ""}`} {...tip("Index #")} onClick={() => setShowIndices((v) => !v)}>
+                      <Hash {...ICON} />
+                    </button>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-          <button className={`panel-btn ${tool === "draw" ? "active" : ""}`} {...tip("Pen (P)")} onClick={() => setTool("draw")}>
-            <Pencil {...ICON} />
-          </button>
-          <button className={`panel-btn ${tool === "text" ? "active" : ""}`} {...tip("Text (T)")} onClick={() => setTool("text")}>
-            <Type {...ICON} />
-          </button>
+              <button className={`panel-btn ${tool === "draw" ? "active" : ""}`} {...tip("Pen (P)")} onClick={() => setTool("draw")}>
+                <Pencil {...ICON} />
+              </button>
+              <button className={`panel-btn ${tool === "text" ? "active" : ""}`} {...tip("Text (T)")} onClick={() => setTool("text")}>
+                <Type {...ICON} />
+              </button>
 
-          <span className="panel-sep" />
+              <span className="panel-sep" />
 
-          {/* Line style toggle */}
-          <button className="panel-btn line-style-btn" {...tip(`Style: ${lineStyle}`)} onClick={() => {
-            const idx = LINE_STYLES.findIndex((ls) => ls.style === lineStyle);
-            const next = LINE_STYLES[(idx + 1) % LINE_STYLES.length];
-            setLineStyle(next.style);
-            if (selectedId) setShapes((p) => p.map((s) => s.id === selectedId ? { ...s, lineStyle: next.style } : s));
-          }}>
-            <svg width="18" height="10" viewBox="0 0 18 10">
-              {lineStyle === "dotted" && <>
-                <circle cx="2" cy="5" r="1.2" fill="currentColor" />
-                <circle cx="6" cy="5" r="1.2" fill="currentColor" />
-                <circle cx="10" cy="5" r="1.2" fill="currentColor" />
-                <circle cx="14" cy="5" r="1.2" fill="currentColor" />
-              </>}
-              {lineStyle === "dashed" && <>
-                <line x1="0" y1="5" x2="5" y2="5" stroke="currentColor" strokeWidth="2" />
-                <line x1="8" y1="5" x2="13" y2="5" stroke="currentColor" strokeWidth="2" />
-              </>}
-              {lineStyle === "solid" && <line x1="0" y1="5" x2="18" y2="5" stroke="currentColor" strokeWidth="2" />}
-            </svg>
-          </button>
+              {/* Line style toggle */}
+              <button className="panel-btn line-style-btn" {...tip(`Style: ${lineStyle}`)} onClick={() => {
+                const idx = LINE_STYLES.findIndex((ls) => ls.style === lineStyle);
+                const next = LINE_STYLES[(idx + 1) % LINE_STYLES.length];
+                setLineStyle(next.style);
+                if (selectedId) setShapes((p) => p.map((s) => s.id === selectedId ? { ...s, lineStyle: next.style } : s));
+              }}>
+                <svg width="18" height="10" viewBox="0 0 18 10">
+                  {lineStyle === "dotted" && <>
+                    <circle cx="2" cy="5" r="1.2" fill="currentColor" />
+                    <circle cx="6" cy="5" r="1.2" fill="currentColor" />
+                    <circle cx="10" cy="5" r="1.2" fill="currentColor" />
+                    <circle cx="14" cy="5" r="1.2" fill="currentColor" />
+                  </>}
+                  {lineStyle === "dashed" && <>
+                    <line x1="0" y1="5" x2="5" y2="5" stroke="currentColor" strokeWidth="2" />
+                    <line x1="8" y1="5" x2="13" y2="5" stroke="currentColor" strokeWidth="2" />
+                  </>}
+                  {lineStyle === "solid" && <line x1="0" y1="5" x2="18" y2="5" stroke="currentColor" strokeWidth="2" />}
+                </svg>
+              </button>
 
-          {/* Color dropdown */}
-          <div className="color-dropdown-wrap">
-            <button className="panel-btn color-trigger" {...tip("Color")} onClick={() => setColorOpen((o) => !o)}>
-              <span className="color-indicator" style={{ backgroundColor: color }} />
-            </button>
-            {colorOpen && (
-              <div className="color-dropdown">
-                {COLORS.map((c, i) => {
-                  const names = ["Red", "Yellow", "Green", "Blue"];
-                  return (
-                    <button key={c} className={`color-dot ${color === c ? "active" : ""}`} style={{ backgroundColor: c }}
-                      {...tip(names[i])}
-                      onClick={() => { handleColorChange(c); setColorOpen(false); }} />
-                  );
-                })}
-                <label className="color-picker-wrap" {...tip("Custom")}>
-                  <Palette size={14} strokeWidth={2} color="rgba(255,255,255,0.5)" />
-                  <input type="color" className="color-picker-input" value={color}
-                    onChange={(e) => { handleColorChange(e.target.value); setColorOpen(false); }} />
-                </label>
+              {/* Color dropdown */}
+              <div className="color-dropdown-wrap">
+                <button className="panel-btn color-trigger" {...tip("Color")} onClick={() => setColorOpen((o) => !o)}>
+                  <span className="color-indicator" style={{ backgroundColor: color }} />
+                </button>
+                {colorOpen && (
+                  <div className="color-dropdown">
+                    {COLORS.map((c, i) => {
+                      const names = ["Red", "Yellow", "Green", "Blue"];
+                      return (
+                        <button key={c} className={`color-dot ${color === c ? "active" : ""}`} style={{ backgroundColor: c }}
+                          {...tip(names[i])}
+                          onClick={() => { handleColorChange(c); setColorOpen(false); }} />
+                      );
+                    })}
+                    <label className="color-picker-wrap" {...tip("Custom")}>
+                      <Palette size={14} strokeWidth={2} color="rgba(255,255,255,0.5)" />
+                      <input type="color" className="color-picker-input" value={color}
+                        onChange={(e) => { handleColorChange(e.target.value); setColorOpen(false); }} />
+                    </label>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
 
-          <span className="panel-sep" />
+              <span className="panel-sep" />
 
-          {selectedId && (
-            <button className="panel-btn delete-btn" {...tip("Delete")} onClick={() => { setShapes((p) => p.filter((s) => s.id !== selectedId)); setSelectedId(null); }}>
-              <Trash2 size={14} strokeWidth={2} />
-            </button>
-          )}
-          <button className="panel-btn" {...tip("Undo ⌘Z")} onClick={() => { setShapes((p) => p.slice(0, -1)); setSelectedId(null); }}>
-            <Undo2 {...ICON} />
-          </button>
-          <button className="panel-btn" {...tip("Clear")} onClick={() => { setShapes([]); setCurrentShape(null); setSelectedId(null); }}>
-            <Eraser {...ICON} />
-          </button>
+              {selectedId && (
+                <button className="panel-btn delete-btn" {...tip("Delete")} onClick={() => { setShapes((p) => p.filter((s) => s.id !== selectedId)); setSelectedId(null); }}>
+                  <Trash2 size={14} strokeWidth={2} />
+                </button>
+              )}
+              <button className="panel-btn" {...tip("Undo ⌘Z")} onClick={() => { setShapes((p) => p.slice(0, -1)); setSelectedId(null); }}>
+                <Undo2 {...ICON} />
+              </button>
+              <button className="panel-btn" {...tip("Clear")} onClick={() => { setShapes([]); setCurrentShape(null); setSelectedId(null); }}>
+                <Eraser {...ICON} />
+              </button>
 
-          <span className="panel-sep" />
+              <span className="panel-sep" />
 
-          <div className="color-dropdown-wrap" ref={snapMenuRef}>
-            <button className="panel-btn snap-btn" {...tip("Snap")} onClick={() => setSnapMenuOpen((o) => !o)}>
-              <Camera {...ICON} />
-            </button>
-            {snapMenuOpen && (
-              <div className="color-dropdown">
-                <button className="panel-btn" {...tip("Single Frame")} onClick={() => { handleScreenshot(); setSnapMenuOpen(false); }}>
+              <div className="color-dropdown-wrap" ref={snapMenuRef}>
+                <button className="panel-btn snap-btn" {...tip("Snap")} onClick={() => setSnapMenuOpen((o) => !o)}>
                   <Camera {...ICON} />
                 </button>
-                <button className="panel-btn" {...tip("Multi Frame")} onClick={() => { setMultiFrameMode(true); setMultiFrames([]); setSnapMenuOpen(false); }}>
-                  <Film {...ICON} />
-                </button>
+                {snapMenuOpen && (
+                  <div className="color-dropdown">
+                    <button className="panel-btn" {...tip("Single Frame")} onClick={() => { handleScreenshot(); setSnapMenuOpen(false); }}>
+                      <Camera {...ICON} />
+                    </button>
+                    <button className="panel-btn" {...tip("Multi Frame")} onClick={() => { setMultiFrameMode(true); setMultiFrames([]); setSnapMenuOpen(false); }}>
+                      <Film {...ICON} />
+                    </button>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-          <button className="panel-btn" {...tip("Detect Sim")} onClick={handleAttach}>
-            <Smartphone {...ICON} />
-          </button>
+              <button className={`panel-btn ${simLoading ? "sim-loading" : ""}`} {...tip("Detect Sim")} onClick={handleAttach} disabled={simLoading}>
+                <Smartphone {...ICON} />
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      {multiFrameMode && (
+      {multiFrameMode && !capturing && !collapsed && (
         <div className="multi-frame-bar">
           <span className="multi-frame-count">{multiFrames.length} frame{multiFrames.length !== 1 ? "s" : ""}</span>
           <button className="panel-btn capture-btn" onClick={handleMultiCapture}>Capture</button>

@@ -281,6 +281,9 @@ fn start_api_server(handle: tauri::AppHandle) {
                     let state = handle.state::<MultiFrameStore>();
                     let mut store = state.results.lock().unwrap_or_else(|e| e.into_inner());
                     let results: Vec<ScreenshotResult> = store.drain(..).collect();
+                    if !results.is_empty() {
+                        let _ = handle.emit("multi-screenshots-taken", &results);
+                    }
                     let body = serde_json::to_string(&results).unwrap_or_default();
                     ("200 OK", body)
                 }
