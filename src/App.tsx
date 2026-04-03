@@ -165,8 +165,8 @@ function App() {
   const frameResizing = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
   const dragState = useRef<DragState>({ mode: "none", startX: 0, startY: 0 });
   const textJustOpened = useRef(false);
-  const savedSize = useRef<{ width: number; height: number } | null>(null);
   const clipboard = useRef<Shape | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const shapesRef = useRef<HTMLDivElement>(null);
   const snapMenuRef = useRef<HTMLDivElement>(null);
 
@@ -328,6 +328,25 @@ function App() {
 
   useEffect(() => { redraw(); }, [redraw]);
 
+  // Fit window tightly to visible content (panel + frame)
+  const fitWindowToContent = useCallback(async (fw?: number, fh?: number) => {
+    const { LogicalSize } = await import("@tauri-apps/api/dpi");
+    const win = getCurrentWindow();
+    const w = fw ?? frameSize.width;
+    const h = fh ?? frameSize.height;
+    const panelW = panelRef.current ? panelRef.current.offsetWidth + 12 : 0; // + 6px margin each side
+    const frameW = w + 16; // 6px margin each side + 2px border each side
+    const neededW = Math.max(panelW, frameW);
+    const neededH = h + 66; // 6(panel margin) + 44(panel) + 6(frame margin) + 4(frame border) + 6(frame bottom margin)
+    await win.setSize(new LogicalSize(neededW, neededH));
+  }, [frameSize]);
+
+  // Fit window on initial mount
+  useEffect(() => {
+    const t = setTimeout(() => fitWindowToContent(), 100);
+    return () => clearTimeout(t);
+  }, []);
+
   useEffect(() => {
     const resize = () => {
       const canvas = canvasRef.current;
@@ -470,14 +489,8 @@ function App() {
       const newW = Math.max(120, startW + ev.clientX - startX);
       const newH = Math.max(80, startH + ev.clientY - startY);
       setFrameSize({ width: newW, height: newH });
-      // Auto-adjust window height to fit frame
-      const { LogicalSize } = await import("@tauri-apps/api/dpi");
-      const win = getCurrentWindow();
-      const winSize = await win.innerSize();
-      const scale = await win.scaleFactor();
-      const winW = Math.round(winSize.width / scale);
-      const neededH = newH + 56; // panel + margins
-      await win.setSize(new LogicalSize(Math.max(winW, newW + 16), neededH));
+      // Auto-adjust window to fit content tightly
+      await fitWindowToContent(newW, newH);
     };
     const onUp = () => {
       frameResizing.current = null;
@@ -715,19 +728,14 @@ function App() {
   const handleCollapse = async () => {
     const { LogicalSize } = await import("@tauri-apps/api/dpi");
     const win = getCurrentWindow();
-    const scale = await win.scaleFactor();
     if (!collapsed) {
-      // Save current logical size before collapsing
-      const size = await win.innerSize();
-      savedSize.current = { width: Math.round(size.width / scale), height: Math.round(size.height / scale) };
       await win.setSize(new LogicalSize(148, 80));
       setCollapsed(true);
       showToast("Frame hidden");
     } else {
-      if (savedSize.current) {
-        await win.setSize(new LogicalSize(savedSize.current.width, savedSize.current.height));
-      }
       setCollapsed(false);
+      // Wait for DOM to render expanded panel, then fit tightly
+      setTimeout(() => fitWindowToContent(), 50);
       showToast("Frame visible");
     }
   };
@@ -739,10 +747,16 @@ function App() {
     try {
       const sim = await invoke<{ x: number; y: number; width: number; height: number; name: string } | null>("get_simulator_window");
       if (sim) {
-        const { LogicalPosition } = await import("@tauri-apps/api/dpi");
+        const { LogicalPosition, LogicalSize } = await import("@tauri-apps/api/dpi");
         const win = getCurrentWindow();
-        await win.setPosition(new LogicalPosition(sim.x - 70, sim.y));
+        await win.setPosition(new LogicalPosition(sim.x - 55, sim.y));
         setFrameSize({ width: Math.round(sim.width * 1.009), height: Math.round(sim.height * 0.939) });
+        if (collapsed) {
+          const newW = Math.round(sim.width * 1.009) + 148;
+          const newH = Math.round(sim.height * 0.939) + 80;
+          await win.setSize(new LogicalSize(newW, newH));
+          setCollapsed(false);
+        }
         const layout = await invoke<{ windows: Array<{ app: string; title: string; x: number; y: number; width: number; height: number }>; arranged: boolean }>("arrange_desktop_layout");
         const winCount = layout.windows.length;
         showToast(`${sim.name} — ${sim.width}×${sim.height} · ${winCount} windows`);
@@ -806,7 +820,7 @@ function App() {
         </div>
       )}
 
-      <div className={`tool-panel ${collapsed ? "panel-collapsed" : ""}`} data-tauri-drag-region>
+      <div ref={panelRef} className={`tool-panel ${collapsed ? "panel-collapsed" : ""}`} data-tauri-drag-region>
         <div className="panel-scroll" data-tauri-drag-region>
           <button className="panel-btn close-btn" {...tip("Close", true)} onClick={handleClose}>
             <X size={12} strokeWidth={2.5} />

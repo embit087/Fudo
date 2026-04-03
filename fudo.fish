@@ -17,20 +17,17 @@ function fudo
 
                     switch $current_view
                         case explore
-                            set dirs Views/Explore
-                            set vms ExploreViewModel ConversationViewModel MessagingViewModel
-                        case materials
-                            set dirs Views/Materials
-                            set vms MaterialsViewModel
+                            set dirs Views/Explore Views/Canvas Views/Materials Views/Queue Views/Recorder
+                            set vms ExploreViewModel ConversationViewModel MessagingViewModel MaterialsViewModel QueueViewModel RecorderViewModel DescribeImageViewModel CanvasViewModel
                         case study
-                            set dirs Views/Study
-                            set vms SessionViewModel SelectionViewModel PracticeViewModel
+                            set dirs Views/Study Views/Practice Views/Typing
+                            set vms SessionViewModel SelectionViewModel PracticeViewModel TypingViewModel StudyListViewModel
                         case studylist
                             set dirs Views/StudyList
-                            set vms StudyListViewModel
+                            set vms StudyListViewModel TypingViewModel
                         case profile
-                            set dirs Views/Profile
-                            set vms ProfileViewModel
+                            set dirs Views/Profile Views/Settings
+                            set vms ProfileViewModel SettingsViewModel
                         case '*'
                             return 0
                     end
@@ -75,20 +72,17 @@ function fudo
 
     switch $current_view
         case explore
-            set dirs Views/Explore
-            set vms ExploreViewModel ConversationViewModel MessagingViewModel
-        case materials
-            set dirs Views/Materials
-            set vms MaterialsViewModel
+            set dirs Views/Explore Views/Canvas Views/Materials Views/Queue Views/Recorder
+            set vms ExploreViewModel ConversationViewModel MessagingViewModel MaterialsViewModel QueueViewModel RecorderViewModel DescribeImageViewModel CanvasViewModel
         case study
-            set dirs Views/Study
-            set vms SessionViewModel SelectionViewModel PracticeViewModel
+            set dirs Views/Study Views/Practice Views/Typing
+            set vms SessionViewModel SelectionViewModel PracticeViewModel TypingViewModel StudyListViewModel
         case studylist
             set dirs Views/StudyList
-            set vms StudyListViewModel
+            set vms StudyListViewModel TypingViewModel
         case profile
-            set dirs Views/Profile
-            set vms ProfileViewModel
+            set dirs Views/Profile Views/Settings
+            set vms ProfileViewModel SettingsViewModel
         case '*'
             return 0
     end

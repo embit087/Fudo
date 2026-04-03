@@ -54,16 +54,28 @@ fn get_sim_context() -> SimContext {
     if let Some(ref view) = current_view {
         let (dirs, vms): (Vec<&str>, Vec<&str>) = match view.as_str() {
             "explore" => (
-                vec!["Views/Explore"],
-                vec!["ExploreViewModel", "ConversationViewModel", "MessagingViewModel"],
+                vec!["Views/Explore", "Views/Canvas", "Views/Materials", "Views/Queue", "Views/Recorder"],
+                vec![
+                    "ExploreViewModel", "ConversationViewModel", "MessagingViewModel",
+                    "MaterialsViewModel", "QueueViewModel", "RecorderViewModel",
+                    "DescribeImageViewModel", "CanvasViewModel",
+                ],
             ),
-            "materials" => (vec!["Views/Materials"], vec!["MaterialsViewModel"]),
             "study" => (
-                vec!["Views/Study"],
-                vec!["SessionViewModel", "SelectionViewModel", "PracticeViewModel"],
+                vec!["Views/Study", "Views/Practice", "Views/Typing"],
+                vec![
+                    "SessionViewModel", "SelectionViewModel", "PracticeViewModel",
+                    "TypingViewModel", "StudyListViewModel",
+                ],
             ),
-            "studylist" => (vec!["Views/StudyList"], vec!["StudyListViewModel"]),
-            "profile" => (vec!["Views/Profile"], vec!["ProfileViewModel"]),
+            "studylist" => (
+                vec!["Views/StudyList"],
+                vec!["StudyListViewModel", "TypingViewModel"],
+            ),
+            "profile" => (
+                vec!["Views/Profile", "Views/Settings"],
+                vec!["ProfileViewModel", "SettingsViewModel"],
+            ),
             _ => (vec![], vec![]),
         };
 
